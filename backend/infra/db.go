@@ -13,5 +13,13 @@ import (
 func NewDB(ctx context.Context, c *config.DatabaseConfig) (*dbdao.DB, error) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True", c.User, c.Password, c.Host, c.DBName)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	return dbdao.NewDB(db), err
+	if err != nil {
+		return nil, err
+	}
+	db.AutoMigrate(
+		&dbdao.ExplorationSession{},
+		&dbdao.GraphNode{},
+		&dbdao.GraphEdge{},
+	)
+	return dbdao.NewDB(db), nil
 }

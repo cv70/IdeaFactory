@@ -2,6 +2,7 @@ package main
 
 import (
 	"backend/config"
+	"backend/domain/exploration"
 	"backend/domain/idea"
 	"backend/domain/user"
 	"backend/infra"
@@ -37,6 +38,11 @@ func main() {
 		
 	}
 	idea.RegisterRoutes(v1, &ideaDomain)
+
+	explorationDomain := exploration.ExplorationDomain{
+		DB: registry.DB,
+	}
+	exploration.RegisterRoutes(v1, &explorationDomain)
 
 	err = r.Run(":8888")
 	mistake.Unwrap(err)
