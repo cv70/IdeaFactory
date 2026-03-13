@@ -1,0 +1,58 @@
+:root {
+  font-family:
+    "Space Grotesk",
+    "IBM Plex Sans",
+    "Avenir Next",
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #12193a;
+  background:
+    radial-gradient(circle at top left, rgba(121, 170, 255, 0.24), transparent 28rem),
+    radial-gradient(circle at 85% 12%, rgba(255, 214, 153, 0.35), transparent 24rem),
+    linear-gradient(180deg, #f7f1e8 0%, #f4efe9 35%, #eef3fa 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --panel-bg: rgba(255, 251, 246, 0.72);
+  --panel-border: rgba(23, 42, 92, 0.1);
+  --panel-shadow: 0 24px 60px rgba(30, 45, 90, 0.08);
+  --main-ink: #12193a;
+  --muted-ink: #5d6787;
+  --accent-ink: #a14d00;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(18, 25, 58, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(18, 25, 58, 0.02) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black 38%, transparent 88%);
+}
+
+#root {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+a {
+  color: inherit;
+}
