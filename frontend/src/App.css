@@ -136,7 +136,8 @@
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   width: 100%;
   border: 1px solid rgba(25, 37, 77, 0.12);
   border-radius: 16px;
@@ -149,6 +150,27 @@
 .field textarea {
   resize: vertical;
   min-height: 7rem;
+}
+
+.strategyPanel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.strategySummary {
+  margin: 0;
+  color: var(--muted-ink);
+  font-size: 0.9rem;
+}
+
+.strategyPresetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.strategySelect {
+  appearance: none;
 }
 
 .launchActions {
@@ -216,6 +238,34 @@
 .workbench {
   display: grid;
   gap: 1rem;
+}
+
+.workspaceList {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.workspaceCard {
+  text-align: left;
+  border: 1px solid rgba(16, 26, 63, 0.09);
+  border-radius: 18px;
+  padding: 0.85rem 0.95rem;
+  background: rgba(255, 255, 255, 0.74);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.workspaceCardActive {
+  border-color: rgba(34, 79, 186, 0.35);
+  background:
+    linear-gradient(180deg, rgba(34, 79, 186, 0.14), rgba(255, 255, 255, 0.82)),
+    rgba(255, 255, 255, 0.7);
+}
+
+.workspaceActions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.25rem;
 }
 
 .branchCard,

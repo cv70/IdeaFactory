@@ -1,9 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import * as explorationApi from '../lib/explorationApi'
 
 describe('idea factory app', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
   it('starts with a launch panel', () => {
     render(<App />)
 
@@ -57,6 +61,62 @@ describe('idea factory app', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Saved ideas \(1\)/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows runtime strategy controls after exploration starts', async () => {
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'AI education' } })
+    fireEvent.change(screen.getByLabelText('Output goal'), {
+      target: { value: 'Research directions' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
+
+    expect(await screen.findByText('Runtime strategy')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Apply strategy' })).toBeInTheDocument()
+    expect(screen.getByText('Strategy history')).toBeInTheDocument()
+  })
+
+  it('switches between historical workspaces', async () => {
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'AI education' } })
+    fireEvent.change(screen.getByLabelText('Output goal'), {
+      target: { value: 'Research directions' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
+    expect(await screen.findByText(/Learning friction for AI education/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Climate fintech' } })
+    fireEvent.change(screen.getByLabelText('Output goal'), {
+      target: { value: 'Venture opportunities' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
+    expect(await screen.findByText(/Learning friction for Climate fintech/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace AI education' }))
+    await waitFor(() => {
+      expect(screen.getByText(/Learning friction for AI education/)).toBeInTheDocument()
+    })
+  })
+
+  it('archives workspace from manager list', async () => {
+    vi.spyOn(explorationApi, 'archiveWorkspace').mockResolvedValueOnce(true)
+
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'AI education' } })
+    fireEvent.change(screen.getByLabelText('Output goal'), {
+      target: { value: 'Research directions' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
+
+    expect(await screen.findByRole('button', { name: 'Archive' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('No historical workspaces yet.')).toBeInTheDocument()
     })
   })
 

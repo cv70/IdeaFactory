@@ -39,10 +39,8 @@ func main() {
 	}
 	idea.RegisterRoutes(v1, &ideaDomain)
 
-	explorationDomain := exploration.ExplorationDomain{
-		DB: registry.DB,
-	}
-	exploration.RegisterRoutes(v1, &explorationDomain)
+	explorationDomain := exploration.NewExplorationDomain(registry.DB)
+	exploration.RegisterRoutes(v1, explorationDomain)
 
 	err = r.Run(":8888")
 	mistake.Unwrap(err)

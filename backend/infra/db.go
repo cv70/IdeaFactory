@@ -20,6 +20,9 @@ func NewDB(ctx context.Context, c *config.DatabaseConfig) (*dbdao.DB, error) {
 		&dbdao.ExplorationSession{},
 		&dbdao.GraphNode{},
 		&dbdao.GraphEdge{},
+		&dbdao.WorkspaceState{},
+		&dbdao.InterventionEvent{},
+		&dbdao.MutationLog{},
 	)
 	return dbdao.NewDB(db), nil
 }

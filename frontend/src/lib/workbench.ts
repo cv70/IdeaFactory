@@ -157,6 +157,11 @@ export function createExplorationSession(input: ExplorationInput): ExplorationSe
     topic,
     outputGoal,
     constraints,
+    strategy: {
+      interval_ms: 4000,
+      max_runs: 30,
+      expansion_mode: 'active',
+    },
     activeOpportunityId,
     nodes,
     edges,
