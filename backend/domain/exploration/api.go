@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +39,33 @@ func (d *ExplorationDomain) ApiGetWorkspace(c *gin.Context) {
 		return
 	}
 	utils.RespSuccess(c, snapshot)
+}
+
+func (d *ExplorationDomain) ApiGetRuntimeState(c *gin.Context) {
+	workspaceID := c.Param("workspaceID")
+	// Ensure workspace exists and runtime has been initialized for loaded sessions.
+	if _, ok := d.GetWorkspace(workspaceID); !ok {
+		utils.RespError(c, 404, "workspace not found")
+		return
+	}
+	query := RuntimeStateQuery{
+		RunID: strings.TrimSpace(c.Query("run_id")),
+	}
+	if latestRuns := strings.TrimSpace(c.Query("latest_runs")); latestRuns != "" {
+		value, err := strconv.Atoi(latestRuns)
+		if err != nil || value <= 0 {
+			utils.RespError(c, 400, "invalid latest_runs")
+			return
+		}
+		query.LatestRuns = value
+	}
+
+	state, ok := d.QueryRuntimeState(workspaceID, query)
+	if !ok {
+		utils.RespError(c, 404, "runtime state not found")
+		return
+	}
+	utils.RespSuccess(c, state)
 }
 
 func (d *ExplorationDomain) ApiReplayMutations(c *gin.Context) {
@@ -220,6 +248,50 @@ func (d *ExplorationDomain) ApiWebSocket(c *gin.Context) {
 				Code:      http.StatusOK,
 				Data:      snapshot,
 			})
+		case "get_runtime_state":
+			var payload struct {
+				RunID      string `json:"run_id"`
+				LatestRuns int    `json:"latest_runs"`
+			}
+			if len(req.Payload) > 0 {
+				if err := json.Unmarshal(req.Payload, &payload); err != nil {
+					_ = d.writeEnvelope(client, wsEnvelope{
+						Type:      "response",
+						RequestID: req.RequestID,
+						Code:      http.StatusBadRequest,
+						Msg:       "invalid runtime query payload",
+					})
+					continue
+				}
+			}
+			if _, ok := d.GetWorkspace(req.WorkspaceID); !ok {
+				_ = d.writeEnvelope(client, wsEnvelope{
+					Type:      "response",
+					RequestID: req.RequestID,
+					Code:      http.StatusNotFound,
+					Msg:       "workspace not found",
+				})
+				continue
+			}
+			state, ok := d.QueryRuntimeState(req.WorkspaceID, RuntimeStateQuery{
+				RunID:      strings.TrimSpace(payload.RunID),
+				LatestRuns: payload.LatestRuns,
+			})
+			if !ok {
+				_ = d.writeEnvelope(client, wsEnvelope{
+					Type:      "response",
+					RequestID: req.RequestID,
+					Code:      http.StatusNotFound,
+					Msg:       "runtime state not found",
+				})
+				continue
+			}
+			_ = d.writeEnvelope(client, wsEnvelope{
+				Type:      "response",
+				RequestID: req.RequestID,
+				Code:      http.StatusOK,
+				Runtime:   state,
+			})
 		case "subscribe":
 			d.addSubscriber(req.WorkspaceID, client)
 			snapshot, ok := d.GetWorkspace(req.WorkspaceID)
@@ -349,10 +421,10 @@ func (d *ExplorationDomain) ApiWebSocket(c *gin.Context) {
 				continue
 			}
 			_ = d.writeEnvelope(client, wsEnvelope{
-				Type:      "response",
-				RequestID: req.RequestID,
-				Code:      http.StatusOK,
-				Mutations: page.Mutations,
+				Type:       "response",
+				RequestID:  req.RequestID,
+				Code:       http.StatusOK,
+				Mutations:  page.Mutations,
 				NextCursor: page.NextCursor,
 				HasMore:    page.HasMore,
 			})

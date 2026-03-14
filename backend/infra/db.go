@@ -21,6 +21,13 @@ func NewDB(ctx context.Context, c *config.DatabaseConfig) (*dbdao.DB, error) {
 		&dbdao.GraphNode{},
 		&dbdao.GraphEdge{},
 		&dbdao.WorkspaceState{},
+		&dbdao.WorkspaceRuntimeState{},
+		&dbdao.RuntimeRunRecord{},
+		&dbdao.RuntimePlanRecord{},
+		&dbdao.RuntimePlanStepRecord{},
+		&dbdao.RuntimeAgentTaskRecord{},
+		&dbdao.RuntimeTaskResultRecord{},
+		&dbdao.RuntimeBalanceRecord{},
 		&dbdao.InterventionEvent{},
 		&dbdao.MutationLog{},
 	)

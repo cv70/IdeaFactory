@@ -20,15 +20,16 @@ type wsRequest struct {
 }
 
 type wsEnvelope struct {
-	Type        string            `json:"type"`
-	RequestID   string            `json:"request_id,omitempty"`
-	WorkspaceID string            `json:"workspace_id,omitempty"`
-	Code        int               `json:"code,omitempty"`
-	Msg         string            `json:"msg,omitempty"`
-	Data        WorkspaceSnapshot `json:"data,omitempty"`
-	Mutations   []MutationEvent   `json:"mutations,omitempty"`
-	NextCursor  string            `json:"next_cursor,omitempty"`
-	HasMore     bool              `json:"has_more,omitempty"`
+	Type        string               `json:"type"`
+	RequestID   string               `json:"request_id,omitempty"`
+	WorkspaceID string               `json:"workspace_id,omitempty"`
+	Code        int                  `json:"code,omitempty"`
+	Msg         string               `json:"msg,omitempty"`
+	Data        WorkspaceSnapshot    `json:"data,omitempty"`
+	Runtime     RuntimeStateSnapshot `json:"runtime,omitempty"`
+	Mutations   []MutationEvent      `json:"mutations,omitempty"`
+	NextCursor  string               `json:"next_cursor,omitempty"`
+	HasMore     bool                 `json:"has_more,omitempty"`
 }
 
 func (d *ExplorationDomain) addSubscriber(workspaceID string, client *wsClient) {
@@ -137,25 +138,36 @@ func (d *ExplorationDomain) startRuntime(workspaceID string) {
 		}()
 
 		for {
-			d.store.mu.Lock()
+			d.store.mu.RLock()
 			session, ok := d.store.workspaces[workspaceID]
 			if !ok {
-				d.store.mu.Unlock()
+				d.store.mu.RUnlock()
 				return
 			}
-			strategy := normalizeRuntimeStrategy(&session.Strategy)
-			if len(session.Runs) >= strategy.MaxRuns {
-				d.store.mu.Unlock()
+			current := *session
+			d.store.mu.RUnlock()
+
+			strategy := normalizeRuntimeStrategy(&current.Strategy)
+			if len(current.Runs) >= strategy.MaxRuns {
 				return
 			}
-			prev := *session
+
 			d.runtime.mu.Lock()
-			targetOpportunityID := chooseRuntimeTarget(*session, d.runtime)
+			targetOpportunityID := chooseRuntimeTarget(current, d.runtime)
 			d.runtime.mu.Unlock()
-			next := d.applyExpandOpportunity(*session, targetOpportunityID)
-			mutations := diffMutations(prev, next, "runtime")
+
+			next := d.applyExpandOpportunity(current, targetOpportunityID)
+			d.executeRuntimeCycle(next, "runtime_tick")
+			mutations := diffMutations(current, next, "runtime")
+
+			d.store.mu.Lock()
+			if _, stillExists := d.store.workspaces[workspaceID]; !stillExists {
+				d.store.mu.Unlock()
+				return
+			}
 			d.store.workspaces[workspaceID] = &next
 			d.store.mu.Unlock()
+
 			d.persistWorkspace(next)
 			d.persistMutations(mutations)
 			d.broadcastMutations(workspaceID, mutations)

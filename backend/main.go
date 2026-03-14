@@ -34,12 +34,10 @@ func main() {
 	}
 	user.RegisterRoutes(v1, &userDomain)
 
-	ideaDomain := idea.IdeaDomain{
-		
-	}
+	ideaDomain := idea.IdeaDomain{}
 	idea.RegisterRoutes(v1, &ideaDomain)
 
-	explorationDomain := exploration.NewExplorationDomain(registry.DB)
+	explorationDomain := exploration.NewExplorationDomain(registry.DB, registry.LLM)
 	exploration.RegisterRoutes(v1, explorationDomain)
 
 	err = r.Run(":8888")

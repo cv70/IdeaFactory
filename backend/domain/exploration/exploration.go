@@ -263,11 +263,9 @@ func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) WorkspaceSna
 	d.store.workspaces[session.ID] = &session
 	d.store.mu.Unlock()
 	d.persistWorkspace(session)
+	d.initializeRuntimeState(session, "workspace_create")
 	d.startRuntime(session.ID)
-	return WorkspaceSnapshot{
-		Exploration:  session,
-		Presentation: buildWorkbenchView(session, ""),
-	}
+	return d.buildWorkspaceSnapshot(session, "")
 }
 
 func (d *ExplorationDomain) GetWorkspace(workspaceID string) (WorkspaceSnapshot, bool) {
@@ -283,13 +281,14 @@ func (d *ExplorationDomain) GetWorkspace(workspaceID string) (WorkspaceSnapshot,
 		d.store.workspaces[workspaceID] = loaded
 		d.store.mu.Unlock()
 		session = loaded
+		d.restoreRuntimeState(workspaceID)
+		d.initializeRuntimeState(*session, "workspace_load")
 		d.startRuntime(workspaceID)
 	}
 	copySession := *session
-	return WorkspaceSnapshot{
-		Exploration:  copySession,
-		Presentation: buildWorkbenchView(copySession, ""),
-	}, true
+	d.restoreRuntimeState(workspaceID)
+	d.initializeRuntimeState(copySession, "workspace_read")
+	return d.buildWorkspaceSnapshot(copySession, ""), true
 }
 
 func byBranch(nodes []Node, branchID string, nodeType NodeType) []Node {
@@ -302,7 +301,15 @@ func byBranch(nodes []Node, branchID string, nodeType NodeType) []Node {
 	return out
 }
 
-func buildWorkbenchView(session ExplorationSession, activeOpportunityID string) WorkbenchView {
+func buildDirectionMapProjection(session ExplorationSession) DirectionMapProjection {
+	return DirectionMapProjection{
+		WorkspaceID: session.ID,
+		Nodes:       append([]Node{}, session.Nodes...),
+		Edges:       append([]Edge{}, session.Edges...),
+	}
+}
+
+func buildWorkbenchProjection(session ExplorationSession, activeOpportunityID string) WorkbenchProjection {
 	opportunities := filterNodesByType(session.Nodes, NodeOpportunity)
 	targetID := firstNonEmpty(activeOpportunityID, session.ActiveOpportunityID)
 	var active *Node
@@ -333,7 +340,7 @@ func buildWorkbenchView(session ExplorationSession, activeOpportunityID string) 
 		}
 	}
 
-	return WorkbenchView{
+	return WorkbenchProjection{
 		Opportunities:     opportunities,
 		ActiveOpportunity: *active,
 		QuestionTrail:     byBranch(session.Nodes, branchID, NodeQuestion),
@@ -341,6 +348,26 @@ func buildWorkbenchView(session ExplorationSession, activeOpportunityID string) 
 		IdeaCards:         ideaCards,
 		SavedIdeas:        savedIdeas,
 		RunNotes:          session.Runs,
+	}
+}
+
+func (d *ExplorationDomain) buildWorkspaceSnapshot(session ExplorationSession, activeOpportunityID string) WorkspaceSnapshot {
+	workbench := buildWorkbenchProjection(session, activeOpportunityID)
+	if runtimeState, ok := d.GetRuntimeState(session.ID); ok {
+		workbench.CurrentFocus = session.ActiveOpportunityID
+		if len(runtimeState.Results) > 0 {
+			workbench.LatestChange = runtimeState.Results[len(runtimeState.Results)-1].Summary
+		}
+		if len(runtimeState.Runs) > 0 {
+			workbench.LatestRunStatus = string(runtimeState.Runs[len(runtimeState.Runs)-1].Status)
+		}
+		workbench.LatestReplanReason = runtimeState.LatestReplanReason
+	}
+
+	return WorkspaceSnapshot{
+		Exploration:  session,
+		DirectionMap: buildDirectionMapProjection(session),
+		Workbench:    workbench,
 	}
 }
 
@@ -471,10 +498,7 @@ func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrateg
 	d.persistMutations(mutations)
 	d.startRuntime(workspaceID)
 
-	return WorkspaceSnapshot{
-		Exploration:  next,
-		Presentation: buildWorkbenchView(next, ""),
-	}, mutations, true
+	return d.buildWorkspaceSnapshot(next, ""), mutations, true
 }
 
 func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req InterventionReq) (WorkspaceSnapshot, []MutationEvent, bool) {
@@ -498,6 +522,12 @@ func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req Interventi
 		next = d.applyExpandOpportunity(next, req.TargetID)
 	case InterventionToggleFavorite:
 		next = d.applyToggleFavorite(next, req.TargetID)
+	case InterventionShiftFocus:
+		next.ActiveOpportunityID = req.TargetID
+	case InterventionAdjustIntensity:
+		// Runtime balance state absorbs this intervention.
+	case InterventionAddContext:
+		// Runtime replanning absorbs this intervention.
 	default:
 		d.store.mu.Unlock()
 		return WorkspaceSnapshot{}, nil, false
@@ -506,13 +536,11 @@ func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req Interventi
 	d.store.mu.Unlock()
 	d.persistWorkspace(next)
 	d.persistIntervention(workspaceID, req)
+	d.replanRuntimeState(next, req)
 	mutations := diffMutations(prev, next, "intervention")
 	d.persistMutations(mutations)
 
-	return WorkspaceSnapshot{
-		Exploration:  next,
-		Presentation: buildWorkbenchView(next, ""),
-	}, mutations, true
+	return d.buildWorkspaceSnapshot(next, ""), mutations, true
 }
 
 func (d *ExplorationDomain) CreateSession(req *CreateSessionReq) (*ExplorationSession, error) {
