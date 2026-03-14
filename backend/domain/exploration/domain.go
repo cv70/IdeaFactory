@@ -4,11 +4,13 @@ import (
 	"backend/datasource/dbdao"
 	"sync"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/gorilla/websocket"
 )
 
 type ExplorationDomain struct {
 	DB    *dbdao.DB
+	LLM   model.ToolCallingChatModel
 	store *workspaceStore
 	ws    *wsState
 	runtime *runtimeState

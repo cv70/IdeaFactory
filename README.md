@@ -27,12 +27,14 @@
 
 - 产品设计：[docs/superpowers/specs/idea-factory-product-design.md](docs/superpowers/specs/idea-factory-product-design.md)
 - 技术设计：[docs/superpowers/specs/idea-factory-technical-design.md](docs/superpowers/specs/idea-factory-technical-design.md)
+- 系统架构：[docs/superpowers/specs/idea-factory-system-architecture.md](docs/superpowers/specs/idea-factory-system-architecture.md)
 
 建议阅读顺序：
 
 1. 先读本页，理解项目定位和当前阶段。
 2. 再读产品设计，理解用户角色、核心闭环和信息架构。
-3. 最后读技术设计，理解 `workspace`、runtime、图模型和前后端边界。
+3. 再读技术设计，理解 `workspace`、runtime、图模型和前后端边界。
+4. 最后读系统架构设计，理解系统分层、组件协作、关键时序和数据职责。
 
 ## 当前仓库状态
 
