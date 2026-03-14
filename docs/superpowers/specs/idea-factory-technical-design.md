@@ -1,355 +1,156 @@
-# Idea Factory 技术设计文档
+# Idea Factory 技术设计文档（Target State）
 
-> 版本：v1
-> 日期：2026-03-13
-> 状态：当前技术架构基线
+> 版本：v1-target
+> 日期：2026-03-14
+> 状态：目标态技术规范（后端内核优先）
 
-更细的系统分层协作、关键时序、数据职责和非功能约束，见 [《Idea Factory 系统架构设计文档》](./idea-factory-system-architecture.md)。
+## 1. 文档职责与边界
 
-## 1. 技术目标与设计不变量
+本文件定义后端内核的目标态：
 
-v1 技术设计服务于一个明确目标：支撑一个以 `workspace` 为核心容器、以系统主驾驶为默认运行方式、以 `方向地图` 为主投影的自治探索系统。
+- 领域对象与状态机
+- `run -> plan -> task -> result -> projection` 主链路
+- 平衡引擎策略级规则
+- 失败与恢复语义
 
-必须成立的技术不变量：
+本文件不定义：
 
-- `Graph is the source of truth`：系统判断、证据和方向结构必须进入图，而不是散落在 prompt、日志或临时缓存里。
-- `Workspace is the primary contract`：顶层产品对象是 `workspace`，不是一次性 `session` 或单次 `run`。
-- `Runtime is event-driven`：持续自治、随时干预和可追溯增长都建立在 `event-driven state machine` 之上。
-- `External behavior is streaming`：产品层应看到持续运行与节点级变化，而不是整图重算式刷新。
-- `Frontend consumes projections`：前端主要消费 `projection`，不直接承担原始图结构的拼装责任。
-- `Intervention is high-level intent`：用户输入的是治理意图，系统负责把它翻译成运行策略与图更新。
+- 产品页面布局与交互文案（见产品设计）
+- 基础设施选型、部署与系统容量细节（见系统架构）
 
-## 2. 顶层系统分层
+## 2. 内核设计不变量
 
-系统建议拆为六层，但它们的边界要围绕产品语义而不是纯技术栈组织。
+- `Workspace` 是顶层业务契约
+- `Run` 是一次自治推进实例
+- `ExecutionPlan` 必须显式存在并可演进
+- `AgentTask` 是计划步骤的执行单元
+- `Graph` 是方向结构真相层
+- `Projection` 是前端读取面，不是写入面
+- `Intervention` 触发重规划，不直接改写图真相
 
-### 2.1 Interface Layer
+## 3. 核心领域模型与状态流转
 
-负责提供：
+### 3.1 Workspace
 
-- Web workbench
-- API
-- SDK / CLI
-- 实时订阅或事件消费入口
+关键字段：`id`、`topic`、`goal`、`constraints`、`budget`、`status`。
 
-这一层只暴露稳定能力，不泄露底层存储细节。
+状态流转：`draft -> active -> paused -> archived`。
 
-### 2.2 Application Layer
+### 3.2 Run
 
-负责：
+关键字段：`id`、`workspace_id`、`trigger_type`、`status`、`current_plan_id`、`started_at`、`finished_at`。
 
-- `workspace` 生命周期
-- 运行配置、预算和权限
-- 任务调度入口
-- `intervention` 接收与编排入口
-- 对外接口聚合
+状态流转：`queued -> planning -> dispatching -> integrating -> projected -> completed | failed | cancelled`。
 
-### 2.3 Runtime Layer
+### 3.3 ExecutionPlan / PlanStep
 
-负责：
+- `ExecutionPlan`：`id`、`run_id`、`version`、`status`。
+- `PlanStep`：`id`、`plan_id`、`order`、`kind`、`assigned_agent`、`status`。
 
-- 解释目标与约束
-- 驱动 `event-driven state machine`
-- 选择下一步探索策略
-- 触发研究、图变更、评估和物化
-- 管理长时间运行与中途干预吸收
+Plan 状态：`draft -> active -> superseded | completed | failed`。
 
-### 2.4 Graph Intelligence Layer
+Step 状态：`todo -> doing -> done | failed | skipped | invalidated`。
 
-负责：
+### 3.4 AgentTask / Result
 
-- 节点与边的读写
-- 语义去重、聚类、压缩
-- 路径与方向评分
-- `decision`、`evidence`、`unknown` 的结构化挂接
-- 快照、分支、重放和 `projection` 生成
+- `AgentTask`：`id`、`step_id`、`agent_role`、`status`、`attempt`、`error_code`。
+- `AgentTaskResultSummary`：`task_id`、`evidence_refs`、`claim_refs`、`unknown_refs`、`decision_delta`。
 
-### 2.5 Research & Context Layer
+Task 状态：`queued -> running -> succeeded | failed | timeout`。
 
-负责：
+### 3.5 BalanceState
 
-- 外部搜索或研究源接入
-- 用户文档与资料摄取
-- 内容切片、归一化和抽取
-- 把输入变成可挂接的 `evidence` / `claim` / `unknown`
+关键字段：
 
-### 2.6 Storage & Streaming Layer
+- `diverge_converge_mode`
+- `research_produce_mode`
+- `aggressive_prudent_mode`
+- `reason`（本轮调节解释）
 
-负责：
+状态取值：`diverge|converge`、`research|produce`、`aggressive|prudent`。
 
-- 结构化元数据持久化
-- 图数据和 mutation 历史
-- 原始资料与物化结果存储
-- 事件日志、异步任务和前端流式同步
+### 3.6 Projection
 
-## 3. 顶层领域模型
+关键字段：`graph_snapshot`、`focus_branches`、`recent_changes`、`run_summary`、`intervention_effects`。
 
-### 3.1 `Workspace`
+约束：Projection 只读可重建；任何写入都必须经 run 主链路产生。
 
-`workspace` 是顶层容器，承载：
+## 4. 主执行链路（Run-Orchestration）
 
-- 主题与目标
-- 约束、预算和偏好
-- 可用上下文源
-- 当前地图状态
-- 历史 `run`
-- 已记录的 `intervention`
-- 已物化的 `artifact`
+1. `CreateRun`：创建 run 与初始上下文
+2. `Plan`：主代理读取 workspace/graph/balance 生成 `ExecutionPlan`
+3. `Dispatch`：按 step 派发 `AgentTask`
+4. `Execute`：子代理经受控工具层执行并返回结构化结果
+5. `Integrate`：主代理合并结果，产出 `decision/evidence/unknown` 变化
+6. `Project`：刷新 projection 并推送状态摘要
+7. `Finalize`：run 进入 `completed/failed/cancelled`
 
-### 3.2 `Run`
+## 5. Intervention 与重规划语义
 
-`run` 是一次自治推进单元，不是顶层产品对象。它负责记录：
+`Intervention` 必须经过以下阶段：
 
-- 触发来源
-- 本轮状态迁移过程
-- 吸收了哪些输入或 `intervention`
-- 生成了哪些图变化、`decision` 和 `artifact`
+- `received`：已写入待处理
+- `absorbed`：被当前或下一轮 run 吸收
+- `replanned`：形成新 plan version
+- `reflected`：projection 出现可见变化
 
-如果未来实现中仍保留 `session`，它也只能是 `workspace` 内部的上下文边界，不应成为对外主契约。
+规则：
 
-### 3.3 图对象
+- 干预到达后，当前 plan 的未执行步骤可被 `invalidated/skipped`
+- 新 plan 必须关联触发干预 ID
+- 对用户返回的状态必须能回答“是否已反映到地图”
 
-图中至少应存在以下一等对象：
+## 6. 平衡引擎策略级规则
 
-- `Topic`
-- `Question`
-- `Tension`
-- `Hypothesis`
-- `Opportunity`
-- `Idea`
-- `Evidence`
-- `Claim`
-- `Decision`
-- `Unknown`
+### 6.1 输入信号
 
-这些对象共同表达方向结构、支持材料、系统判断和待解空白。
+- 分支数量与分布
+- 最近证据密度
+- 重复路径比例
+- 干预频率与方向偏置
+- 连续 run 的增量价值
 
-### 3.4 `Intervention`
+### 6.2 决策规则
 
-`intervention` 不是前端临时输入，而是必须持久化的治理对象。它至少要表达：
+- 候选方向过少且证据稀薄：偏 `diverge + research`
+- 候选方向过多但可比性弱：偏 `converge + research`
+- 方向稳定且证据充分：偏 `converge + produce`
+- 连续停滞且用户接受探索风险：偏 `aggressive`
+- 已有高置信路径：偏 `prudent`
 
-- 谁在何时发起
-- 目标意图是什么
-- 影响范围是整个 `workspace`、某个方向还是某条路径
-- 是否已被 runtime 吸收
-- 吸收后引发了哪些状态变化
+### 6.3 回退规则
 
-### 3.5 `Projection`
+- 任一模式连续 N 轮无增量，自动回退到中性组合
+- 出现高风险失败（工具不可用、关键任务超时）时强制 `prudent`
 
-`projection` 是面向产品消费的稳定读取面。典型类型包括：
+## 7. 错误模型与恢复边界
 
-- `workspace overview projection`
-- `direction map projection`
-- `path projection`
-- `runtime status projection`
-- `artifact projection`
+- 任务级失败：重试不超过上限，失败留痕，不阻断全局 run
+- 计划级失败：run 标记 `failed`，保留中间可追溯状态
+- 投影刷新失败：不回滚图真相层，允许异步补投影
+- 流式推送失败：客户端可用 `since_event_id` 补拉
 
-### 3.6 `Artifact`
+恢复要求：
 
-`artifact` 是从图中物化出的结果层对象，只服务于消费和复用，不反向替代图真相层。第一阶段只需要少量、可追溯的物化形态。
+- 任何中断都可通过 `run + plan + task + event` 恢复可解释状态
+- 不允许出现“前端看到结果但后端无对应 run 轨迹”
 
-## 4. Runtime 模型
+## 8. 接口契约来源（OpenAPI）
 
-### 4.1 选择
+HTTP/WS 对外契约以以下文件为准：
 
-v1 采用 `event-driven state machine`，而不是长生命周期黑盒 agent 或固定 DAG。
+- [idea-factory-openapi.yaml](./idea-factory-openapi.yaml)
 
-原因：
+本文件只定义语义，不重复字段级接口细节。
 
-- 需要支持长时间运行和中途治理
-- 需要把系统行为变成可追溯状态迁移
-- 需要把多种输入统一建模为事件
-- 需要把恢复、重放和观察建立在同一机制上
+## 9. 能力清单验收（技术层）
 
-### 4.2 主要事件来源
+- 可创建 run 并产生显式 plan 与 step
+- step 可驱动 task 执行并产出结构化 summary
+- intervention 可触发 plan version 变化
+- projection 可表达最近变化与干预效果
+- 核心状态可追溯到 run/plan/task 层
 
-系统至少要吸收以下事件类型：
+## 10. 一句话总结
 
-- `workspace.created`
-- `workspace.goal.updated`
-- `run.started`
-- `context.ingested`
-- `research.completed`
-- `intervention.received`
-- `budget.updated`
-- `projection.refresh.requested`
-- `run.completed`
-- `run.failed`
-
-### 4.3 主要状态
-
-运行态围绕以下阶段组织：
-
-1. `interpret`
-2. `explore`
-3. `structure`
-4. `evaluate`
-5. `materialize`
-6. `reflect`
-
-这些状态不是一次性 pipeline 的硬编码步骤，而是 runtime 在不同事件推动下反复进入的能力态。
-
-### 4.4 输出
-
-每轮状态迁移的标准输出应包括：
-
-- 图变更
-- 新的或被替换的 `decision`
-- 新挂接的 `evidence` / `claim` / `unknown`
-- `projection` 刷新信号
-- 下一步运行策略
-
-系统默认不因为进入关键状态而暂停等待批准。用户可以随时发起 `intervention`，runtime 应在不中断整体运行的前提下吸收并重排后续行为。
-
-## 5. 图更新与一致性模型
-
-产品层希望看到的是 `节点级流式变更`，但内部仍然需要一致性边界。
-
-### 5.1 对外表现
-
-- 地图应像持续生长的结构，而不是每隔一段时间整页刷新
-- 用户需要看到方向升温、分叉、合并、降权和停滞
-- `intervention` 后的结构变化应尽快反映到 `projection`
-
-### 5.2 内部一致性边界
-
-内部实现可以采用 mutation 批次或等价事务边界来保证：
-
-- 一组相关节点、边和 `decision` 同时提交
-- 失败时可回滚或标记失败
-- 后续可以重放并重建某一版本的地图
-
-### 5.3 快照与重放
-
-图层至少应支持：
-
-- `snapshot`
-- mutation history
-- branch or alternative path tracking
-- projection rebuild
-
-这样系统才能回答：
-
-- 当前地图相比上一个稳定状态发生了什么
-- 某个方向为何被提升或压低
-- 某个 `decision` 是何时被替换的
-- 某次 `intervention` 具体改变了哪些结构
-
-## 6. Research 与 Context 注入
-
-外部研究与用户上下文不应走多套主流程。统一处理路径应为：
-
-`ContextSource -> normalized fragments -> Evidence / Claim / Unknown -> graph attachment`
-
-这条路径的作用是：
-
-- 让搜索、笔记、网页、文件和临时输入进入同一体系
-- 让 runtime 可以统一评估证据密度和空白区
-- 让 `decision` 和 `artifact` 可以稳定追溯来源
-
-v1 中，研究层至少要提供三类能力：
-
-- 来源登记与状态管理
-- 片段切分与归一化
-- 与现有方向结构的语义挂接
-
-## 7. 前后端边界与接口方向
-
-### 7.1 主契约
-
-前端主要消费 `projection API`，而不是原始图表结构。这样做的原因是：
-
-- 前端的主任务是呈现产品语义，而不是复刻图计算逻辑
-- 图模型和评分逻辑在 v1 到 v2 之间大概率持续演进
-- `projection` 更容易稳定支撑地图、侧栏、运行态和详情面板
-
-### 7.2 API 能力分组
-
-对外接口应按能力组织，而不是按页面按钮组织：
-
-- `workspace` 创建、读取、更新与状态查询
-- `run` 启动、状态读取与历史查询
-- `projection` 读取与订阅
-- `intervention` 提交与处理状态查询
-- `context source` 注入与重处理
-- `artifact` 物化与追溯读取
-
-### 7.3 原始图读取边界
-
-前端仍可在局部深查场景读取原始图或 mutation 信息，但只用于：
-
-- 调试
-- 高级解释
-- 运维与分析
-
-它不应成为主视图的默认依赖。
-
-## 8. 存储与异步执行建议
-
-v1 不必过早绑定具体基础设施产品，但需要明确几类存储职责：
-
-- 关系型或等价结构存储：保存 `workspace`、`run`、`intervention`、`artifact` 等元数据
-- 图持久化层：保存节点、边、mutation 历史与快照
-- 原始内容存储：保存文档、网页抓取结果、资料切片和物化结果
-- 事件与异步执行层：承载 runtime 事件、重试、恢复和流式广播
-- 缓存或订阅层：服务前端的实时状态同步
-
-关键要求不是某个具体数据库，而是支持：
-
-- 可追溯
-- 可重放
-- 可恢复
-- 可扩展
-
-## 9. v1 验收标准与非目标
-
-### 9.1 验收标准
-
-技术架构至少要支持以下结果：
-
-- 在一个 `workspace` 中持续运行自治探索，而不是只完成一次任务
-- 接受中途 `intervention`，并将其转化为后续策略和图变化
-- 让 `方向地图` 以流式方式更新
-- 让高价值方向稳定追溯到 `evidence`、`decision` 和 `run`
-- 让前端只依赖 `projection` 就能完成主控制台体验
-
-### 9.2 非目标
-
-- 不在 v1 做强实时多人协作
-- 不在 v1 把前端做成通用图编辑器
-- 不在 v1 开放过细的图操作 API 作为主交互
-- 不在 v1 建立复杂插件市场或模板系统
-
-## 10. 演进建议
-
-### 阶段一：探索内核定型
-
-优先完成：
-
-- `workspace` 契约
-- runtime 事件模型
-- 图 mutation / snapshot 机制
-- `evidence` 和 `decision` 的持久化路径
-- `projection` 基线
-
-### 阶段二：参考工作台验证
-
-优先完成：
-
-- `方向地图` 主投影
-- 运行态解释层
-- `intervention` 生效路径
-- 路径与物化结果下钻
-
-### 阶段三：平台化开放
-
-优先完成：
-
-- API / SDK 稳定化
-- strategy 配置能力
-- research adapter 扩展
-- 更多 `artifact` 形态
-
-## 11. 一句话总结
-
-`Idea Factory` v1 的技术架构应围绕一个中心展开：以 `workspace` 为顶层容器、以 `event-driven state machine` 为自治运行内核、以图为唯一真相层、以 `projection` 为前端主契约，支撑一张持续生长、可治理、可追溯的 `方向地图`。
+技术内核必须是可重规划、可追溯、可恢复的 run 编排系统，而不是隐式循环逻辑。
