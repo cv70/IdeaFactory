@@ -4,7 +4,6 @@ import (
 	"backend/datasource/dbdao"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -45,6 +44,193 @@ func (d *ExplorationDomain) loadWorkspace(workspaceID string) (*ExplorationSessi
 	return &session, true
 }
 
+func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
+	if d.DB == nil {
+		return
+	}
+	snapshot, ok := d.GetRuntimeState(workspaceID)
+	if !ok {
+		return
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return
+	}
+	_ = d.DB.UpsertWorkspaceRuntimeState(&dbdao.WorkspaceRuntimeState{
+		WorkspaceID: workspaceID,
+		Snapshot:    string(raw),
+	})
+
+	projection := dbdao.RuntimeStateProjection{
+		WorkspaceID: workspaceID,
+		Runs:        make([]dbdao.RuntimeRunRecord, 0, len(snapshot.Runs)),
+		Plans:       make([]dbdao.RuntimePlanRecord, 0, len(snapshot.Plans)),
+		PlanSteps:   make([]dbdao.RuntimePlanStepRecord, 0, len(snapshot.PlanSteps)),
+		AgentTasks:  make([]dbdao.RuntimeAgentTaskRecord, 0, len(snapshot.AgentTasks)),
+		Results:     make([]dbdao.RuntimeTaskResultRecord, 0, len(snapshot.Results)),
+	}
+	for _, item := range snapshot.Runs {
+		projection.Runs = append(projection.Runs, dbdao.RuntimeRunRecord{
+			ID:          item.ID,
+			WorkspaceID: item.WorkspaceID,
+			Source:      item.Source,
+			Status:      string(item.Status),
+			StartedAt:   item.StartedAt,
+			EndedAt:     item.EndedAt,
+		})
+	}
+	for _, item := range snapshot.Plans {
+		projection.Plans = append(projection.Plans, dbdao.RuntimePlanRecord{
+			ID:          item.ID,
+			WorkspaceID: item.WorkspaceID,
+			RunID:       item.RunID,
+			Version:     item.Version,
+			CreatedAtMs: item.CreatedAt,
+		})
+	}
+	for _, item := range snapshot.PlanSteps {
+		projection.PlanSteps = append(projection.PlanSteps, dbdao.RuntimePlanStepRecord{
+			ID:          item.ID,
+			WorkspaceID: item.WorkspaceID,
+			RunID:       item.RunID,
+			PlanID:      item.PlanID,
+			StepIndex:   item.Index,
+			Desc:        item.Desc,
+			Status:      string(item.Status),
+			UpdatedAtMs: item.UpdatedAt,
+		})
+	}
+	for _, item := range snapshot.AgentTasks {
+		projection.AgentTasks = append(projection.AgentTasks, dbdao.RuntimeAgentTaskRecord{
+			ID:          item.ID,
+			WorkspaceID: item.WorkspaceID,
+			RunID:       item.RunID,
+			PlanID:      item.PlanID,
+			PlanStepID:  item.PlanStepID,
+			SubAgent:    item.SubAgent,
+			Goal:        item.Goal,
+			Status:      string(item.Status),
+			UpdatedAtMs: item.UpdatedAt,
+		})
+	}
+	for _, item := range snapshot.Results {
+		projection.Results = append(projection.Results, dbdao.RuntimeTaskResultRecord{
+			TaskID:      item.TaskID,
+			WorkspaceID: workspaceID,
+			Summary:     item.Summary,
+			IsSuccess:   item.IsSuccess,
+			UpdatedAtMs: item.UpdatedAt,
+		})
+	}
+	if snapshot.Balance.WorkspaceID != "" {
+		projection.Balance = &dbdao.RuntimeBalanceRecord{
+			WorkspaceID:        snapshot.Balance.WorkspaceID,
+			RunID:              snapshot.Balance.RunID,
+			Divergence:         snapshot.Balance.Divergence,
+			Research:           snapshot.Balance.Research,
+			Aggression:         snapshot.Balance.Aggression,
+			Reason:             snapshot.Balance.Reason,
+			UpdatedAtMs:        snapshot.Balance.UpdatedAt,
+			LatestReplanReason: snapshot.LatestReplanReason,
+		}
+	}
+	_ = d.DB.ReplaceWorkspaceRuntimeProjection(projection)
+}
+
+func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSnapshot, bool) {
+	if d.DB == nil {
+		return RuntimeStateSnapshot{}, false
+	}
+	projection, err := d.DB.LoadWorkspaceRuntimeProjection(workspaceID)
+	if err == nil && projection != nil && len(projection.Runs) > 0 {
+		out := RuntimeStateSnapshot{
+			Runs:               make([]Run, 0, len(projection.Runs)),
+			Plans:              make([]ExecutionPlan, 0, len(projection.Plans)),
+			PlanSteps:          make([]PlanStep, 0, len(projection.PlanSteps)),
+			AgentTasks:         make([]AgentTask, 0, len(projection.AgentTasks)),
+			Results:            make([]AgentTaskResultSummary, 0, len(projection.Results)),
+			LatestReplanReason: projection.LatestReplanReason,
+		}
+		for _, item := range projection.Runs {
+			out.Runs = append(out.Runs, Run{
+				ID:          item.ID,
+				WorkspaceID: item.WorkspaceID,
+				Source:      item.Source,
+				Status:      RunStatus(item.Status),
+				StartedAt:   item.StartedAt,
+				EndedAt:     item.EndedAt,
+			})
+		}
+		for _, item := range projection.Plans {
+			out.Plans = append(out.Plans, ExecutionPlan{
+				ID:          item.ID,
+				WorkspaceID: item.WorkspaceID,
+				RunID:       item.RunID,
+				Version:     item.Version,
+				CreatedAt:   item.CreatedAtMs,
+			})
+		}
+		for _, item := range projection.PlanSteps {
+			out.PlanSteps = append(out.PlanSteps, PlanStep{
+				ID:          item.ID,
+				WorkspaceID: item.WorkspaceID,
+				RunID:       item.RunID,
+				PlanID:      item.PlanID,
+				Index:       item.StepIndex,
+				Desc:        item.Desc,
+				Status:      PlanStepStatus(item.Status),
+				UpdatedAt:   item.UpdatedAtMs,
+			})
+		}
+		for _, item := range projection.AgentTasks {
+			out.AgentTasks = append(out.AgentTasks, AgentTask{
+				ID:          item.ID,
+				WorkspaceID: item.WorkspaceID,
+				RunID:       item.RunID,
+				PlanID:      item.PlanID,
+				PlanStepID:  item.PlanStepID,
+				SubAgent:    item.SubAgent,
+				Goal:        item.Goal,
+				Status:      PlanStepStatus(item.Status),
+				UpdatedAt:   item.UpdatedAtMs,
+			})
+		}
+		for _, item := range projection.Results {
+			out.Results = append(out.Results, AgentTaskResultSummary{
+				TaskID:    item.TaskID,
+				Summary:   item.Summary,
+				IsSuccess: item.IsSuccess,
+				UpdatedAt: item.UpdatedAtMs,
+			})
+		}
+		if projection.Balance != nil {
+			out.Balance = BalanceState{
+				WorkspaceID: projection.Balance.WorkspaceID,
+				RunID:       projection.Balance.RunID,
+				Divergence:  projection.Balance.Divergence,
+				Research:    projection.Balance.Research,
+				Aggression:  projection.Balance.Aggression,
+				Reason:      projection.Balance.Reason,
+				UpdatedAt:   projection.Balance.UpdatedAtMs,
+			}
+		}
+		return out, true
+	}
+
+	state, err := d.DB.GetWorkspaceRuntimeState(workspaceID)
+	if err != nil || state == nil {
+		return RuntimeStateSnapshot{}, false
+	}
+	var snapshot RuntimeStateSnapshot
+	if err := json.Unmarshal([]byte(state.Snapshot), &snapshot); err != nil {
+		return RuntimeStateSnapshot{}, false
+	}
+	if len(snapshot.Runs) == 0 {
+		return RuntimeStateSnapshot{}, false
+	}
+	return snapshot, true
+}
+
 func (d *ExplorationDomain) persistIntervention(workspaceID string, req InterventionReq) {
 	if d.DB == nil {
 		return
@@ -60,7 +246,17 @@ func (d *ExplorationDomain) persistIntervention(workspaceID string, req Interven
 }
 
 func (d *ExplorationDomain) persistMutations(mutations []MutationEvent) {
-	if d.DB == nil || len(mutations) == 0 {
+	if len(mutations) == 0 {
+		return
+	}
+	if d.DB == nil {
+		workspaceID := mutations[0].WorkspaceID
+		d.runtime.mu.Lock()
+		d.runtime.mutations[workspaceID] = append(d.runtime.mutations[workspaceID], mutations...)
+		if len(d.runtime.mutations[workspaceID]) > 3000 {
+			d.runtime.mutations[workspaceID] = append([]MutationEvent{}, d.runtime.mutations[workspaceID][len(d.runtime.mutations[workspaceID])-2000:]...)
+		}
+		d.runtime.mu.Unlock()
 		return
 	}
 
@@ -96,24 +292,58 @@ func parseCursor(cursor string) (time.Time, string, error) {
 	if strings.TrimSpace(cursor) == "" {
 		return time.Time{}, "", nil
 	}
-	parts := strings.SplitN(cursor, "|", 2)
-	if len(parts) != 2 {
+	ts, id, ok := parseOrderedCursor(cursor)
+	if !ok {
 		return time.Time{}, "", fmt.Errorf("invalid cursor")
 	}
-	unixMs, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	return time.UnixMilli(unixMs), parts[1], nil
+	return ts, id, nil
 }
 
 func buildCursor(createdAt time.Time, id string) string {
-	return fmt.Sprintf("%d|%s", createdAt.UnixMilli(), id)
+	// Keep legacy cursor shape for existing mutation consumers.
+	return buildOrderedCursorUnixMilli(createdAt, id)
 }
 
 func (d *ExplorationDomain) replayMutations(workspaceID string, cursor string, limit int) (MutationReplayPage, error) {
 	if d.DB == nil {
-		return MutationReplayPage{}, nil
+		cursorTime, cursorID, err := parseCursor(cursor)
+		if err != nil {
+			return MutationReplayPage{}, err
+		}
+		fetchLimit := limit
+		if fetchLimit <= 0 || fetchLimit > 1000 {
+			fetchLimit = 200
+		}
+
+		d.runtime.mu.Lock()
+		logs := append([]MutationEvent{}, d.runtime.mutations[workspaceID]...)
+		d.runtime.mu.Unlock()
+
+		filtered := make([]MutationEvent, 0, len(logs))
+		for _, event := range logs {
+			if cursorTime.IsZero() {
+				filtered = append(filtered, event)
+				continue
+			}
+			eventTime := time.UnixMilli(event.CreatedAt)
+			if eventTime.After(cursorTime) || (eventTime.Equal(cursorTime) && event.ID > cursorID) {
+				filtered = append(filtered, event)
+			}
+		}
+
+		hasMore := len(filtered) > fetchLimit
+		if hasMore {
+			filtered = filtered[:fetchLimit]
+		}
+		page := MutationReplayPage{
+			Mutations: filtered,
+			HasMore:   hasMore,
+		}
+		if hasMore && len(filtered) > 0 {
+			last := filtered[len(filtered)-1]
+			page.NextCursor = buildCursor(time.UnixMilli(last.CreatedAt), last.ID)
+		}
+		return page, nil
 	}
 
 	cursorTime, cursorID, err := parseCursor(cursor)
@@ -179,4 +409,50 @@ func (d *ExplorationDomain) compactMutationLogs(workspaceID string, hardLimit in
 	}
 	state.LastCompactedAt = time.Now()
 	_ = d.DB.UpsertWorkspaceState(state)
+}
+
+func (d *ExplorationDomain) persistV1Intervention(view InterventionView) {
+	if d.DB == nil || view.ID == "" || view.WorkspaceID == "" {
+		return
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		return
+	}
+	// Snapshot record keeps the latest lifecycle state for fast point-read.
+	snapshot := &dbdao.InterventionEvent{
+		ID:          view.ID,
+		WorkspaceID: view.WorkspaceID,
+		Type:        "v1_intervention_snapshot",
+		TargetID:    string(view.Status),
+		Note:        string(raw),
+		CreatedAt:   time.Now(),
+	}
+	_ = d.DB.UpsertInterventionEvent(snapshot)
+
+	// History record appends each lifecycle change for replay/audit.
+	history := &dbdao.InterventionEvent{
+		ID:          fmt.Sprintf("%s#%d", view.ID, time.Now().UnixNano()),
+		WorkspaceID: view.WorkspaceID,
+		Type:        "v1_intervention_lifecycle_event",
+		TargetID:    string(view.Status),
+		Note:        string(raw),
+		CreatedAt:   time.Now(),
+	}
+	_ = d.DB.CreateInterventionEvent(history)
+}
+
+func (d *ExplorationDomain) loadV1Intervention(workspaceID string, interventionID string) (InterventionView, bool) {
+	if d.DB == nil || workspaceID == "" || interventionID == "" {
+		return InterventionView{}, false
+	}
+	event, err := d.DB.GetInterventionEvent(workspaceID, interventionID)
+	if err != nil || event == nil || event.Type != "v1_intervention_snapshot" {
+		return InterventionView{}, false
+	}
+	var view InterventionView
+	if err := json.Unmarshal([]byte(event.Note), &view); err != nil {
+		return InterventionView{}, false
+	}
+	return view, true
 }
