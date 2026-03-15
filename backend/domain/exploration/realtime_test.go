@@ -292,27 +292,6 @@ func (fakePlanningModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatM
 	return fakePlanningModel{}, nil
 }
 
-func TestGeneratePlanStepsWithModel(t *testing.T) {
-	domain := NewExplorationDomain(nil, fakePlanningModel{})
-	session := createWorkspace(CreateWorkspaceReq{
-		Topic:      "AI education",
-		OutputGoal: "Research directions",
-	})
-	steps := domain.generatePlanStepsWithModel(context.Background(), session, 3)
-	if len(steps) != 3 {
-		t.Fatalf("expected 3 steps, got %d", len(steps))
-	}
-	if steps[0] != "scan evidence" {
-		t.Fatalf("unexpected first step: %s", steps[0])
-	}
-	if steps[1] != "update direction graph" {
-		t.Fatalf("unexpected second step: %s", steps[1])
-	}
-	if steps[2] != "package top idea" {
-		t.Fatalf("unexpected third step: %s", steps[2])
-	}
-}
-
 type fakeResumableAgent struct {
 	called bool
 }

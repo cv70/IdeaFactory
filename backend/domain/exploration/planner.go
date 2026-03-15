@@ -18,8 +18,8 @@ type ReplanTrigger struct {
 }
 
 // Planner builds and adapts execution plans for a workspace.
-// All methods are called from within a withWorkspaceState callback,
-// so they must not call withWorkspaceState themselves.
+// BuildInitialPlan and Replan may be called inside withWorkspaceState (they must be fast).
+// GenerateNodesForCycle must be called OUTSIDE withWorkspaceState — it may make network calls.
 type Planner interface {
 	// BuildInitialPlan creates the first plan for a workspace.
 	BuildInitialPlan(ctx context.Context, session *ExplorationSession, state *RuntimeWorkspaceState) (*ExecutionPlan, []PlanStep, error)
