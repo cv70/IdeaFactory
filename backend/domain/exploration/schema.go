@@ -14,6 +14,8 @@ const (
 	NodeClaim       NodeType = "claim"
 	NodeDecision    NodeType = "decision"
 	NodeUnknown     NodeType = "unknown"
+	NodeDirection   NodeType = "direction"
+	NodeArtifact    NodeType = "artifact"
 )
 
 type EdgeType string
@@ -26,7 +28,11 @@ const (
 	EdgeContradicts EdgeType = "contradicts"
 	EdgeQuestions   EdgeType = "questions"
 	EdgeExplains    EdgeType = "explains"
-	EdgeWeakens     EdgeType = "weakens"
+	EdgeWeakens      EdgeType = "weakens"
+	EdgeJustifies    EdgeType = "justifies"
+	EdgeBranchesFrom EdgeType = "branches_from"
+	EdgeRaises       EdgeType = "raises"
+	EdgeResolves     EdgeType = "resolves"
 )
 
 type NodeStatus string
