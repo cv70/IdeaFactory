@@ -385,6 +385,163 @@ func (d *ExplorationDomain) executeNextTodoStepLocked(workspaceID string, now ti
 	return true
 }
 
+// snapshotForCycle reads a consistent copy of session and runtime state for use by GenerateNodesForCycle.
+// Acquires store.mu then runtime.mu separately — never both simultaneously.
+// hasTodo is true if the current plan has at least one PlanStepTodo step.
+func (d *ExplorationDomain) snapshotForCycle(workspaceID string) (session ExplorationSession, state RuntimeWorkspaceState, hasTodo bool) {
+	// Step 1: copy session under store.mu
+	d.store.mu.RLock()
+	if ws, ok := d.store.workspaces[workspaceID]; ok {
+		session = *ws
+	}
+	d.store.mu.RUnlock()
+
+	// Step 2: copy runtime state under runtime.mu
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		state.Plans = append([]ExecutionPlan{}, s.Plans...)
+		state.PlanSteps = append([]PlanStep{}, s.PlanSteps...)
+		state.Balance = s.Balance
+		state.AgentTasks = append([]AgentTask{}, s.AgentTasks...)
+		state.Results = append([]AgentTaskResultSummary{}, s.Results...)
+		state.ReplanReason = s.ReplanReason
+		if len(s.Plans) > 0 {
+			currentPlanID := s.Plans[len(s.Plans)-1].ID
+			for _, step := range s.PlanSteps {
+				if step.PlanID == currentPlanID && step.Status == PlanStepTodo {
+					hasTodo = true
+					break
+				}
+			}
+		}
+	})
+	return
+}
+
+// markStepDoneAndCheck marks the first Todo step in the current plan as Done,
+// appends an AgentTask result, and returns true if no Todo steps remain.
+func (d *ExplorationDomain) markStepDoneAndCheck(workspaceID string) (allDone bool) {
+	now := time.Now()
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		if len(s.Plans) == 0 {
+			allDone = true
+			return
+		}
+		currentPlan := s.Plans[len(s.Plans)-1]
+		targetIdx := -1
+		for i, step := range s.PlanSteps {
+			if step.PlanID == currentPlan.ID && step.Status == PlanStepTodo {
+				targetIdx = i
+				break
+			}
+		}
+		if targetIdx == -1 {
+			allDone = true
+			return
+		}
+		step := &s.PlanSteps[targetIdx]
+		taskID := fmt.Sprintf("task-%s-%d", currentPlan.ID, step.Index)
+		s.AgentTasks = append(s.AgentTasks, AgentTask{
+			ID:          taskID,
+			WorkspaceID: workspaceID,
+			RunID:       currentPlan.RunID,
+			PlanID:      currentPlan.ID,
+			PlanStepID:  step.ID,
+			SubAgent:    subAgentForStep(step.Index),
+			Goal:        step.Desc,
+			Status:      PlanStepDone,
+			UpdatedAt:   now.UnixMilli(),
+		})
+		s.Results = append(s.Results, AgentTaskResultSummary{
+			TaskID:    taskID,
+			Summary:   subAgentForStep(step.Index) + " completed",
+			IsSuccess: true,
+			UpdatedAt: now.UnixMilli(),
+		})
+		step.Status = PlanStepDone
+		step.UpdatedAt = now.UnixMilli()
+		// Check if any Todo steps remain
+		for _, st := range s.PlanSteps {
+			if st.PlanID == currentPlan.ID && st.Status == PlanStepTodo {
+				return // more work to do
+			}
+		}
+		allDone = true
+	})
+	return
+}
+
+// runAgentCycle drives the agent execution loop for a workspace in a background goroutine.
+// It reads state snapshots, calls LLMPlanner.GenerateNodesForCycle outside locks,
+// applies nodes, and broadcasts via WebSocket. Sets AgentRunning=false on completion or panic.
+func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
+	// Read current run ID before defer (needed in panic handler)
+	var currentRunID string
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		if len(s.Runs) > 0 {
+			currentRunID = s.Runs[len(s.Runs)-1].ID
+		}
+	})
+
+	defer func() {
+		if r := recover(); r != nil {
+			d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+				s.AgentRunning = false
+				if len(s.Runs) > 0 && s.Runs[len(s.Runs)-1].Status != RunStatusCompleted {
+					s.Runs[len(s.Runs)-1].Status = RunStatusFailed
+					s.Runs[len(s.Runs)-1].EndedAt = time.Now().UnixMilli()
+				}
+			})
+			d.broadcastMutations(workspaceID, []MutationEvent{{
+				ID:          mutationID(workspaceID),
+				WorkspaceID: workspaceID,
+				Kind:        "run_failed",
+				Run:         &GenerationRun{ID: currentRunID},
+				CreatedAt:   time.Now().UnixMilli(),
+			}})
+		}
+	}()
+
+	totalCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	for {
+		sessionCopy, stateCopy, hasTodo := d.snapshotForCycle(workspaceID)
+		if !hasTodo {
+			break
+		}
+
+		stepCtx, stepCancel := context.WithTimeout(totalCtx, 2*time.Minute)
+		nodes, edges := d.planner.GenerateNodesForCycle(stepCtx, &sessionCopy, &stateCopy)
+		stepCancel()
+
+		d.applyGeneratedNodes(workspaceID, nodes, edges)
+
+		if d.markStepDoneAndCheck(workspaceID) {
+			break
+		}
+	}
+
+	// Mark complete and broadcast
+	var completedRunID string
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		s.AgentRunning = false
+		if len(s.Runs) > 0 {
+			completedRunID = s.Runs[len(s.Runs)-1].ID
+			if s.Runs[len(s.Runs)-1].Status == RunStatusRunning {
+				s.Runs[len(s.Runs)-1].Status = RunStatusCompleted
+				s.Runs[len(s.Runs)-1].EndedAt = time.Now().UnixMilli()
+			}
+		}
+	})
+	d.broadcastMutations(workspaceID, []MutationEvent{{
+		ID:          mutationID(workspaceID),
+		WorkspaceID: workspaceID,
+		Kind:        "run_completed",
+		Run:         &GenerationRun{ID: completedRunID},
+		CreatedAt:   time.Now().UnixMilli(),
+	}})
+}
+
 func subAgentForStep(index int) string {
 	switch index {
 	case 1:
