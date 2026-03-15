@@ -515,8 +515,9 @@ func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 		stepCancel()
 
 		d.applyGeneratedNodes(workspaceID, nodes, edges)
-
-		if d.markStepDoneAndCheck(workspaceID) {
+		allDone := d.markStepDoneAndCheck(workspaceID)
+		d.persistRuntimeState(workspaceID)
+		if allDone {
 			break
 		}
 	}
