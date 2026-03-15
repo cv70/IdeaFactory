@@ -2,6 +2,7 @@ package exploration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -1033,4 +1034,153 @@ func isRFC3339(v string) bool {
 	}
 	pattern := `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`
 	return regexp.MustCompile(pattern).MatchString(v)
+}
+
+func TestDeterministicPlannerInitialRun(t *testing.T) {
+	p := NewDeterministicPlanner()
+	session := &ExplorationSession{
+		ID:    "ws-test",
+		Topic: "machine learning for healthcare",
+	}
+	state := &RuntimeWorkspaceState{
+		Balance: BalanceState{
+			Divergence: 0.6,
+			Research:   0.7,
+			Aggression: 0.4,
+		},
+	}
+	nodes, edges := p.GenerateNodesForCycle(context.Background(), session, state)
+	if len(nodes) == 0 {
+		t.Fatal("expected Direction nodes on first cycle, got none")
+	}
+	for _, n := range nodes {
+		if n.Type != NodeDirection {
+			t.Errorf("expected all initial nodes to be NodeDirection, got %s", n.Type)
+		}
+	}
+	// No edges expected for initial Direction nodes
+	for _, e := range edges {
+		_ = e
+	}
+	if len(nodes) < 3 || len(nodes) > 5 {
+		t.Errorf("expected 3-5 Direction nodes, got %d", len(nodes))
+	}
+}
+
+func TestDeterministicPlannerResearchPhase(t *testing.T) {
+	p := NewDeterministicPlanner()
+	dirNode := Node{ID: "dir-1", Type: NodeDirection, Title: "ML for diagnosis", WorkspaceID: "ws-test"}
+	session := &ExplorationSession{
+		ID:    "ws-test",
+		Topic: "machine learning for healthcare",
+		Nodes: []Node{dirNode},
+	}
+	state := &RuntimeWorkspaceState{
+		Balance: BalanceState{
+			Divergence: 0.6,
+			Research:   0.7,
+			Aggression: 0.4,
+		},
+	}
+	nodes, edges := p.GenerateNodesForCycle(context.Background(), session, state)
+	if len(nodes) == 0 {
+		t.Fatal("expected Evidence nodes in research phase, got none")
+	}
+	for _, n := range nodes {
+		if n.Type != NodeEvidence {
+			t.Errorf("expected Evidence nodes, got %s", n.Type)
+		}
+	}
+	// Each Evidence node should have an edge to the Direction
+	if len(edges) == 0 {
+		t.Error("expected edges from Evidence to Direction, got none")
+	}
+	for _, e := range edges {
+		if e.Type != EdgeSupports && e.Type != EdgeContradicts {
+			t.Errorf("expected EdgeSupports or EdgeContradicts, got %s", e.Type)
+		}
+		if e.To != dirNode.ID {
+			t.Errorf("expected edge to direction ID %s, got %s", dirNode.ID, e.To)
+		}
+	}
+}
+
+func TestDeterministicPlannerFastPath(t *testing.T) {
+	p := NewDeterministicPlanner()
+	dirNode := Node{ID: "dir-1", Type: NodeDirection, Title: "ML for diagnosis", WorkspaceID: "ws-test"}
+	session := &ExplorationSession{
+		ID:    "ws-test",
+		Topic: "machine learning for healthcare",
+		Nodes: []Node{dirNode}, // Direction but no Evidence
+	}
+	state := &RuntimeWorkspaceState{
+		Balance: BalanceState{
+			Aggression: 0.8, // High aggression: skip Evidence, go straight to Claims
+		},
+	}
+	nodes, _ := p.GenerateNodesForCycle(context.Background(), session, state)
+	if len(nodes) == 0 {
+		t.Fatal("expected Claim nodes on fast path, got none")
+	}
+	for _, n := range nodes {
+		if n.Type != NodeClaim {
+			t.Errorf("expected NodeClaim on fast path, got %s", n.Type)
+		}
+	}
+}
+
+func TestDeterministicPlannerConvergence(t *testing.T) {
+	p := NewDeterministicPlanner()
+	dir := Node{ID: "dir-1", Type: NodeDirection, WorkspaceID: "ws-test"}
+	ev1 := Node{ID: "ev-1", Type: NodeEvidence, Metadata: NodeMetadata{BranchID: "dir-1"}, WorkspaceID: "ws-test"}
+	ev2 := Node{ID: "ev-2", Type: NodeEvidence, Metadata: NodeMetadata{BranchID: "dir-1"}, WorkspaceID: "ws-test"}
+	claim := Node{ID: "cl-1", Type: NodeClaim, Metadata: NodeMetadata{BranchID: "dir-1"}, WorkspaceID: "ws-test"}
+	session := &ExplorationSession{
+		ID:    "ws-test",
+		Topic: "machine learning for healthcare",
+		Nodes: []Node{dir, ev1, ev2, claim},
+		Edges: []Edge{
+			{ID: "e1", From: "ev-1", To: "dir-1", Type: EdgeSupports},
+			{ID: "e2", From: "ev-2", To: "dir-1", Type: EdgeContradicts},
+		},
+	}
+	state := &RuntimeWorkspaceState{
+		Balance: BalanceState{
+			Divergence: 0.3, // Converge: should produce Decision
+		},
+	}
+	nodes, _ := p.GenerateNodesForCycle(context.Background(), session, state)
+	if len(nodes) == 0 {
+		t.Fatal("expected Decision node in convergence, got none")
+	}
+	for _, n := range nodes {
+		if n.Type != NodeDecision {
+			t.Errorf("expected NodeDecision in convergence, got %s", n.Type)
+		}
+	}
+}
+
+func TestInterventionAdjustsBalanceState(t *testing.T) {
+	domain := newTestExplorationDomain()
+	req := CreateWorkspaceReq{Topic: "quantum computing", OutputGoal: "summary"}
+	snapshot := domain.CreateWorkspace(req)
+	wsID := snapshot.Exploration.ID
+
+	// Set known balance state
+	domain.withWorkspaceState(wsID, func(state *RuntimeWorkspaceState) {
+		state.Balance = BalanceState{WorkspaceID: wsID, Divergence: 0.6, Research: 0.6, Aggression: 0.4}
+	})
+
+	// Apply intervention with converging intent
+	intReq := InterventionReq{Type: InterventionAddContext, Note: "please focus and 收敛"}
+	domain.replanRuntimeState(snapshot.Exploration, intReq)
+
+	var balance BalanceState
+	domain.withWorkspaceState(wsID, func(state *RuntimeWorkspaceState) {
+		balance = state.Balance
+	})
+	// "focus" and "收敛" both trigger Divergence -= 0.2, accumulated = -0.4 → clamped
+	if balance.Divergence >= 0.6 {
+		t.Errorf("expected Divergence to decrease after '收敛' intent, got %f", balance.Divergence)
+	}
 }

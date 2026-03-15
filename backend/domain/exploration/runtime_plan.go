@@ -11,18 +11,6 @@ import (
 	"github.com/kaptinlin/jsonrepair"
 )
 
-func buildInitialBalance(session ExplorationSession, runID string, now time.Time) BalanceState {
-	return BalanceState{
-		WorkspaceID: session.ID,
-		RunID:       runID,
-		Divergence:  0.6,
-		Research:    0.7,
-		Aggression:  0.45,
-		Reason:      "bootstrap exploration state from initial workspace graph",
-		UpdatedAt:   now.UnixMilli(),
-	}
-}
-
 func buildInitialPlan(domain *ExplorationDomain, session ExplorationSession, runID string, now time.Time) (ExecutionPlan, []PlanStep) {
 	planID := fmt.Sprintf("plan-%s-%d", session.ID, now.UnixNano())
 	plan := ExecutionPlan{
