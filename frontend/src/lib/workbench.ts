@@ -233,17 +233,20 @@ export function expandOpportunity(
   session: ExplorationSession,
   opportunityId: string,
 ): ExplorationSession {
-  const opportunity = session.nodes.find((node) => node.id === opportunityId && node.type === 'opportunity')
+  const opportunity = session.nodes.find(
+    (node) => node.id === opportunityId && (node.type === 'opportunity' || node.type === 'direction'),
+  )
   if (!opportunity) {
     return session
   }
 
   const branchId = opportunity.metadata.branchId ?? opportunity.id
   const branchIdeas = byBranch(session, branchId, 'idea')
-  const sourceHypothesis = byBranch(session, branchId, 'hypothesis')[0]
-  if (!sourceHypothesis) {
-    return session
-  }
+  // Support both old hypothesis and new evidence node types as the parent link source.
+  const sourceParent =
+    byBranch(session, branchId, 'hypothesis')[0] ??
+    byBranch(session, branchId, 'evidence')[0] ??
+    opportunity
 
   const nextIdea = makeNode(
     session.id,
@@ -259,7 +262,7 @@ export function expandOpportunity(
     ...session,
     activeOpportunityId: opportunityId,
     nodes: [...session.nodes, nextIdea],
-    edges: [...session.edges, makeEdge(sourceHypothesis.id, nextIdea.id, 'expands')],
+    edges: [...session.edges, makeEdge(sourceParent.id, nextIdea.id, 'expands')],
     runs: [
       ...session.runs,
       {

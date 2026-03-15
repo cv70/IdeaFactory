@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 )
 
-func BuildExplorationAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.ResumableAgent, error) {
+func NewExplorationAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.ResumableAgent, error) {
 	if cm == nil {
 		return nil, fmt.Errorf("chat model is nil")
 	}

@@ -96,7 +96,7 @@ func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *Explorat
 		},
 	}
 	if lm != nil {
-		if agent, err := agents.BuildExplorationAgent(context.Background(), lm); err == nil {
+		if agent, err := agents.NewExplorationAgent(context.Background(), lm); err == nil {
 			domain.DeepAgent = agent
 		}
 		if general, err := agents.NewGeneralAgent(context.Background(), lm); err == nil {
