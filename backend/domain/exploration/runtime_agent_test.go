@@ -63,10 +63,19 @@ func TestMarkStepDoneAndCheck_MarksFirstTodoDone(t *testing.T) {
 		t.Fatal("expected done=false with steps remaining")
 	}
 	var step1Status PlanStepStatus
+	var agentTaskCount, resultCount int
 	domain.withWorkspaceState(wsID, func(s *RuntimeWorkspaceState) {
 		step1Status = s.PlanSteps[0].Status
+		agentTaskCount = len(s.AgentTasks)
+		resultCount = len(s.Results)
 	})
 	if step1Status != PlanStepDone {
 		t.Errorf("expected step-1 to be Done, got %s", step1Status)
+	}
+	if agentTaskCount != 1 {
+		t.Errorf("expected 1 AgentTask appended, got %d", agentTaskCount)
+	}
+	if resultCount != 1 {
+		t.Errorf("expected 1 Result appended, got %d", resultCount)
 	}
 }
