@@ -33,17 +33,6 @@ func (d *ExplorationDomain) ApiV1GetWorkspace(c *gin.Context) {
 	c.JSON(http.StatusOK, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration)})
 }
 
-func (d *ExplorationDomain) ApiV1GetProjection(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
-	snapshot, ok := d.GetWorkspace(workspaceID)
-	if !ok {
-		writeV1Error(c, http.StatusNotFound, "not_found", "workspace not found")
-		return
-	}
-	projection := d.buildProjectionResponse(snapshot)
-	c.JSON(http.StatusOK, projection)
-}
-
 func toWorkspaceView(session ExplorationSession) WorkspaceView {
 	constraints := []string{}
 	if strings.TrimSpace(session.Constraints) != "" {

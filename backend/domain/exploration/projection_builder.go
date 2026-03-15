@@ -2,8 +2,22 @@ package exploration
 
 import (
 	"fmt"
+	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
+
+func (d *ExplorationDomain) ApiV1GetProjection(c *gin.Context) {
+	workspaceID := c.Param("workspaceID")
+	snapshot, ok := d.GetWorkspace(workspaceID)
+	if !ok {
+		writeV1Error(c, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+	projection := d.buildProjectionResponse(snapshot)
+	c.JSON(http.StatusOK, projection)
+}
 
 func (d *ExplorationDomain) buildProjectionResponse(snapshot WorkspaceSnapshot) ProjectionResponse {
 	now := time.Now().UnixMilli()
