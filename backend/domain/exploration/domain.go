@@ -24,6 +24,7 @@ type RuntimeWorkspaceState struct {
 	ReplanReason  string
 	Interventions map[string]InterventionView // keyed by intervention ID
 	Running       bool
+	AgentRunning  bool // true while runAgentCycle goroutine is active
 	Cursor        int
 }
 
@@ -81,10 +82,10 @@ func (d *ExplorationDomain) withWorkspaceState(workspaceID string, fn func(*Runt
 }
 
 func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *ExplorationDomain {
+	ctx := context.Background()
 	domain := &ExplorationDomain{
-		DB:      db,
-		Model:   lm,
-		planner: NewDeterministicPlanner(),
+		DB:    db,
+		Model: lm,
 		store: &workspaceStore{
 			workspaces: map[string]*ExplorationSession{},
 		},
@@ -95,17 +96,18 @@ func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *Explorat
 			workspaces: map[string]*RuntimeWorkspaceState{},
 		},
 	}
+
 	if lm != nil {
-		if agent, err := agents.NewExplorationAgent(context.Background(), lm); err == nil {
-			domain.DeepAgent = agent
-		}
-		if general, err := agents.NewGeneralAgent(context.Background(), lm); err == nil {
-			domain.General = general
-		}
+		g, _ := agents.NewGeneralAgent(ctx, lm)
+		r, _ := agents.NewResearchAgent(ctx, lm) // nil if DuckDuckGo init fails
+		gr, _ := agents.NewGraphAgent(ctx, lm)
+		a, _ := agents.NewArtifactAgent(ctx, lm)
+		domain.planner = NewLLMPlanner(g, r, gr, a)
+		domain.General = g
+		domain.DeepAgent, _ = agents.NewExplorationAgent(ctx, lm)
 	} else {
-		if general, err := agents.NewGeneralAgent(context.Background(), nil); err == nil {
-			domain.General = general
-		}
+		domain.planner = NewDeterministicPlanner()
+		domain.General, _ = agents.NewGeneralAgent(ctx, nil)
 	}
 	return domain
 }
