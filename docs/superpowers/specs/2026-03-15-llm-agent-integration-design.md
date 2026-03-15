@@ -10,10 +10,10 @@
 
 The backend has LLM and agent infrastructure initialized but never invoked in the execution path:
 
-- `DeterministicPlanner.GenerateNodesForCycle` uses keyword splitting to generate hardcoded node content (e.g. "Explore X as a strategic direction")
+- `DeterministicPlanner.GenerateNodesForCycle` uses keyword splitting to generate hardcoded node content
 - `executeNextTodoStepLocked` marks every plan step as Done immediately without calling any agent
 - `DeepAgent` and `General` on `ExplorationDomain` are initialized but never used
-- `generatePlanStepsWithModel` is dead code — it exists but is never called
+- `generatePlanStepsWithModel` is dead code — never called
 
 ## Goal
 
@@ -26,22 +26,13 @@ Wire real LLM/agent calls into the exploration runtime so that:
 
 ## Architecture
 
-### Approach: Per-Step Specialist Agents (Plan B)
+### Approach: Per-Step Specialist Agents
 
-Keep the `Planner` interface unchanged. Add `LLMPlanner` implementing it. Each call to `GenerateNodesForCycle` dispatches the appropriate agent based on graph state, parses JSON output into nodes, and falls back to `DeterministicPlanner` on parse failure.
+Keep the `Planner` interface signature unchanged. Add `LLMPlanner` implementing it. The key design constraint: `GenerateNodesForCycle` must be called **outside** `withWorkspaceState` to avoid holding `runtime.mu` during network calls.
 
-`ApiV1CreateRun` becomes non-blocking: creates Run + Plan synchronously (returns 202 + run_id), then launches a goroutine that drives the agent execution cycle.
+**Interface comment update required:** `planner.go` currently says "All methods are called from within a withWorkspaceState callback." Remove this comment — it was an implementation assumption, not a contract. `BuildInitialPlan` and `Replan` may still be called inside the lock (they are fast), but `GenerateNodesForCycle` must not be.
 
-```
-POST /workspaces/:id/runs
-   │
-   ├─ sync: create Run + Plan  →  202 + run_id
-   │
-   └─ go runAgentCycle(session)
-        ├─ Step 1: GeneralAgent   → Direction nodes  → broadcast
-        ├─ Step 2: ResearchAgent  → Evidence nodes   → broadcast
-        └─ Step 3: ArtifactAgent → Claim/Decision/Artifact nodes → broadcast
-```
+`ApiV1CreateRun` becomes non-blocking: creates Run + Plan synchronously and returns 202 + run_id immediately, then a goroutine drives the agent execution cycle.
 
 ---
 
@@ -51,103 +42,364 @@ POST /workspaces/:id/runs
 
 ```go
 type LLMPlanner struct {
-    general  adk.Agent             // Direction generation
-    research adk.Agent             // Evidence (has DuckDuckGo search tool)
-    graph    adk.Agent             // Claim synthesis
-    artifact adk.Agent             // Decision + Artifact
-    fallback *DeterministicPlanner // parse failure fallback
+    general  adk.Agent             // Direction generation (NewGeneralAgent)
+    research adk.Agent             // Evidence — NewResearchAgent (DuckDuckGo)
+    graph    adk.Agent             // Claim synthesis — NewGraphAgent
+    artifact adk.Agent             // Decision + Artifact — NewArtifactAgent
+    fallback *DeterministicPlanner // used when agent is nil or output parse fails
 }
 ```
 
-Implements `Planner` interface:
-- `BuildInitialPlan` / `Replan`: delegates to `DeterministicPlanner` (plan structure stays deterministic)
-- `GenerateNodesForCycle`: dispatches agent based on graph state, parses JSON, falls back on error
+- `BuildInitialPlan` / `Replan`: delegate entirely to `fallback` — called inside lock, must be fast
+- `GenerateNodesForCycle`: select agent by priority, call outside lock, parse JSON, fallback on error
 
-### Agent → Node Type Mapping
+#### Calling an agent and extracting text
 
-| Graph State | Agent | Output JSON Schema | Node Types |
-|---|---|---|---|
-| No Direction nodes | `GeneralAgent` | `{"directions":[{"title":"...","summary":"..."}]}` | `NodeDirection` |
-| Has Direction, missing Evidence | `ResearchAgent` | `{"evidence":[{"title":"...","summary":"...","supports":true,"direction_id":"..."}]}` | `NodeEvidence` + edges |
-| Has Evidence, missing Claim | `GraphAgent` | `{"claims":[{"title":"...","summary":"...","direction_id":"..."}]}` | `NodeClaim` + edges |
-| Divergence < 0.4 | `ArtifactAgent` | `{"decision":{"title":"...","summary":"..."},"artifact":{"title":"...","summary":"..."}}` | `NodeDecision`, `NodeArtifact` + edges |
+`adk.Agent.Run` returns `*adk.AsyncIterator[*adk.AgentEvent]`. Use this helper to consume the iterator and extract the final text output:
 
-JSON parsing uses existing `jsonrepair` library (already used in `runtime_llm.go`). Any parse failure silently falls back to `DeterministicPlanner` equivalent method.
-
-### 2. Async Execution (`runtime_agent.go`)
-
-New method `runAgentCycle(session ExplorationSession)` runs in a goroutine:
-
+```go
+func runAgent(ctx context.Context, agent adk.Agent, prompt string) (string, error) {
+    input := &adk.AgentInput{
+        Messages: []*schema.Message{schema.UserMessage(prompt)},
+    }
+    iter := agent.Run(ctx, input)
+    var lastContent string
+    for {
+        event, ok := iter.Next()
+        if !ok {
+            break
+        }
+        if event.Err != nil {
+            return "", event.Err
+        }
+        if event.Output != nil && event.Output.MessageOutput != nil {
+            msg, err := event.Output.MessageOutput.GetMessage()
+            if err == nil && msg != nil && strings.TrimSpace(msg.Content) != "" {
+                lastContent = msg.Content
+            }
+        }
+    }
+    if lastContent == "" {
+        return "", fmt.Errorf("agent returned empty content")
+    }
+    return lastContent, nil
+}
 ```
-for each pending step in current plan:
-    nodes, edges = planner.GenerateNodesForCycle(ctx, session, state)
-    applyGeneratedNodes(workspaceID, nodes, edges)   // broadcasts via WebSocket
-    mark step Done, update state
-run.Status = Completed, broadcast run_completed mutation
+
+`GetMessage()` handles both streaming and non-streaming `MessageVariant`. The returned string is passed to `jsonrepair` + `json.Unmarshal`.
+
+#### Callers of `GenerateNodesForCycle` and session snapshots
+
+`GenerateNodesForCycle` takes `*ExplorationSession` (with Nodes/Edges) and `*RuntimeWorkspaceState`. Callers obtain these differently:
+
+- **`runAgentCycle`** (new): reads fresh copies from both stores via `snapshotForCycle` (see Lock Order section)
+- **`initializeRuntimeState`, `initializeWorkspaceGraph`**: already have a local `sessionCopy` from the store; pass it directly rather than re-reading. Move only the `GenerateNodesForCycle` call outside `withWorkspaceState`; copy the needed `RuntimeWorkspaceState` fields beforehand.
+- **`replanRuntimeState`**: receives `session ExplorationSession` as a value parameter. Move only the `GenerateNodesForCycle` call outside `withWorkspaceState`; copy state fields into a local variable before releasing the lock.
+- **`executeRuntimeCycle`**: same pattern — copy state fields, release lock, then call `GenerateNodesForCycle` outside.
+
+None of these callers need to re-acquire `store.mu` for the session — they already have a valid copy.
+
+### Agent → Node Type Priority
+
+Mirrors `DeterministicPlanner` rule ordering to keep graph topology consistent with the fallback:
+
+| Priority | Condition | Agent used | Prompt includes | Output JSON | Node types |
+|---|---|---|---|---|---|
+| 1 | `len(dirNodes) == 0` | `general` | topic, outputGoal | `{"directions":[{"title":"...","summary":"..."}]}` | `NodeDirection` |
+| 2 | Any Direction has < 2 Evidence AND Aggression ≤ 0.6 AND Research ≥ 0.5 | `research` | topic, under-evidenced direction IDs+titles | `{"evidence":[{"title":"...","summary":"...","edge_type":"supports"\|"contradicts","direction_id":"<existing-node-id>"}]}` | `NodeEvidence` + edges |
+| 3 | Any Direction missing Claim (after priorities 1+2 pass) | `graph` | topic, direction IDs+titles, their evidence summaries | `{"claims":[{"title":"...","summary":"...","direction_id":"<existing-node-id>"}]}` | `NodeClaim` + edges |
+| 4 | All Directions have Claims AND Divergence < 0.4 | `artifact` | topic, all claim titles+summaries | `{"decision":{"title":"...","summary":"..."},"artifact":{"title":"...","summary":"..."}}` | `NodeDecision` + `NodeArtifact` + edges |
+| — | None of the above | — (return nil, nil) | — | — | — |
+
+**Prompt construction:** Before each agent call, build a string prompt from the current session snapshot. For priorities 2 and 3, include existing direction node IDs and titles so the agent can return valid `direction_id` values. Example for priority 2:
+```
+Topic: {session.Topic}
+Directions to research (use these exact IDs in direction_id):
+- {dir.ID}: {dir.Title}
+...
+Generate 1-2 evidence items per direction as JSON.
 ```
 
-Concurrency guard: `RuntimeWorkspaceState.Running` (field already exists) prevents duplicate goroutines per workspace.
+**Invalid `direction_id` handling:** After parsing agent output, validate each returned `direction_id` against the set of known direction node IDs in the session snapshot. Drop any item with an unrecognized `direction_id`. If all items are dropped, treat as parse failure and use fallback.
 
-### 3. `ApiV1CreateRun` changes (`handler_run.go`)
+**Fallback on error:** Call the exact `DeterministicPlanner` sub-method that corresponds to the priority that was being attempted (e.g., priority 2 error → `fallback.generateEvidence(underEvidenced, wsID, now)`), passing the same inputs derived from the snapshot. Do not call `DeterministicPlanner.GenerateNodesForCycle` (which would re-evaluate all priorities).
 
-Before: calls `executeRuntimeCycle` synchronously, blocks until done.
-After:
-1. Calls `initializeOrContinueRun` synchronously (creates Run + Plan, returns run_id)
-2. Checks `state.Running`; if false, launches `go d.runAgentCycle(session)`
-3. Returns 202 immediately with run_id
+### 2. `runAgentCycle` goroutine (`runtime_agent.go`)
 
-### 4. `domain.go`
+```go
+func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
+    var currentRunID string
+    d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+        if len(s.Runs) > 0 {
+            currentRunID = s.Runs[len(s.Runs)-1].ID
+        }
+    })
 
-`NewExplorationDomain`: when `lm != nil`, construct individual agents (ResearchAgent, GraphAgent, ArtifactAgent, GeneralAgent) and pass them to `LLMPlanner`. Use `LLMPlanner` as `d.planner`. When `lm == nil`, keep `DeterministicPlanner`.
+    defer func() {
+        if r := recover(); r != nil {
+            d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+                s.AgentRunning = false
+                if len(s.Runs) > 0 {
+                    s.Runs[len(s.Runs)-1].Status = RunStatusFailed
+                    s.Runs[len(s.Runs)-1].EndedAt = time.Now().UnixMilli()
+                }
+            })
+            d.broadcastMutations(workspaceID, []MutationEvent{{
+                ID:          mutationID(workspaceID),
+                WorkspaceID: workspaceID,
+                Kind:        "run_failed",
+                Run:         &GenerationRun{ID: currentRunID}, // same pattern as run_created
+                CreatedAt:   time.Now().UnixMilli(),
+            }})
+        }
+    }()
 
-`DeepAgent` (eino ResumableAgent) remains available on the domain for future use but is not part of this change.
+    totalCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+    defer cancel()
+
+    for {
+        // Step A: read snapshot (two separate locks — see Lock Order)
+        sessionCopy, stateCopy, hasTodo := d.snapshotForCycle(workspaceID)
+        if !hasTodo {
+            break
+        }
+
+        // Step B: per-step timeout (2 minutes per agent call)
+        stepCtx, stepCancel := context.WithTimeout(totalCtx, 2*time.Minute)
+        nodes, edges := d.planner.GenerateNodesForCycle(stepCtx, &sessionCopy, &stateCopy)
+        stepCancel()
+
+        // Step C: apply nodes + broadcast
+        d.applyGeneratedNodes(workspaceID, nodes, edges)
+
+        // Step D: mark step Done; check if more remain
+        done := d.markStepDoneAndCheck(workspaceID)
+        if done {
+            break
+        }
+    }
+
+    // Broadcast run_completed
+    var completedRunID string
+    d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+        s.AgentRunning = false
+        if len(s.Runs) > 0 {
+            completedRunID = s.Runs[len(s.Runs)-1].ID
+        }
+    })
+    d.broadcastMutations(workspaceID, []MutationEvent{{
+        ID:          mutationID(workspaceID),
+        WorkspaceID: workspaceID,
+        Kind:        "run_completed",
+        Run:         &GenerationRun{ID: completedRunID}, // only ID is populated
+        CreatedAt:   time.Now().UnixMilli(),
+    }})
+}
+```
+
+#### Lock Order and Snapshot (`snapshotForCycle`)
+
+`snapshotForCycle` is only called from `runAgentCycle`. Signature and behavior:
+
+```go
+// snapshotForCycle returns copies of session and runtime state needed for GenerateNodesForCycle,
+// and reports whether there is a pending (Todo) plan step to process.
+func (d *ExplorationDomain) snapshotForCycle(workspaceID string) (
+    session ExplorationSession,
+    state RuntimeWorkspaceState,
+    hasTodo bool,
+) {
+    // Step 1: read session (Nodes, Edges, Topic, etc.) under store.mu
+    d.store.mu.RLock()
+    if ws, ok := d.store.workspaces[workspaceID]; ok {
+        session = *ws // value copy
+    }
+    d.store.mu.RUnlock()
+
+    // Step 2: read runtime state fields needed by planner under runtime.mu
+    d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+        state.Plans = append([]ExecutionPlan{}, s.Plans...)
+        state.PlanSteps = append([]PlanStep{}, s.PlanSteps...)
+        state.Balance = s.Balance
+        state.AgentTasks = append([]AgentTask{}, s.AgentTasks...)
+        // hasTodo = true if the current plan has any step with Status == PlanStepTodo
+        if len(s.Plans) > 0 {
+            currentPlanID := s.Plans[len(s.Plans)-1].ID
+            for _, step := range s.PlanSteps {
+                if step.PlanID == currentPlanID && step.Status == PlanStepTodo {
+                    hasTodo = true
+                    break
+                }
+            }
+        }
+    })
+    return
+}
+```
+
+Never hold `store.mu` and `runtime.mu` simultaneously. Always release `store.mu` before acquiring `runtime.mu`.
+
+### 3. Concurrency: `AgentRunning` flag + ticker coordination
+
+Add `AgentRunning bool` to `RuntimeWorkspaceState` as a **new field alongside the existing `Running bool`** (which is managed by the realtime ticker and must not be reused). Both fields coexist:
+
+```go
+// RuntimeWorkspaceState after this change:
+Running      bool // existing — managed by realtime ticker (realtime.go), unchanged
+AgentRunning bool // NEW — true while runAgentCycle goroutine is active
+```
+
+**`LLMPlanner` package:** `LLMPlanner` is defined in the `exploration` package (same as `DeterministicPlanner`), so it can call the unexported fallback methods `generateDirections`, `generateEvidence`, `generateClaims`, `generateDecision`, `generateArtifact` directly. The new file `planner_llm.go` has `package exploration`.
+
+**Ticker coordination:** While `AgentRunning == true`, the realtime ticker's `executeRuntimeCycle` must be a no-op for that workspace to prevent concurrent node generation. Add a guard at the start of `executeRuntimeCycle`:
+
+```go
+func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, source string) {
+    var skip bool
+    d.withWorkspaceState(session.ID, func(s *RuntimeWorkspaceState) {
+        skip = s.AgentRunning
+    })
+    if skip {
+        return
+    }
+    // ... rest of function
+}
+```
+
+### 4. All `GenerateNodesForCycle` call sites requiring refactor
+
+All four call sites currently invoke `GenerateNodesForCycle` inside `withWorkspaceState`. Each must be refactored to the snapshot-call-apply pattern:
+
+| Function | File | Action |
+|---|---|---|
+| `initializeRuntimeState` | `runtime_agent.go` | Move `GenerateNodesForCycle` call outside `withWorkspaceState` |
+| `replanRuntimeState` | `runtime_agent.go` | Move `GenerateNodesForCycle` call outside `withWorkspaceState` |
+| `executeRuntimeCycle` | `runtime_agent.go` | Move `GenerateNodesForCycle` call outside `withWorkspaceState` |
+| `initializeWorkspaceGraph` | `runtime_agent.go` | Move `GenerateNodesForCycle` call outside `withWorkspaceState` |
+
+Pattern for each:
+```go
+// Before (inside withWorkspaceState — wrong for LLMPlanner):
+newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &sessionCopy, state)
+
+// After (outside withWorkspaceState — correct):
+sessionCopy, stateCopy := d.snapshotForCycle(workspaceID)
+newNodes, newEdges := d.planner.GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
+```
+
+### 5. `ApiV1CreateRun` changes (`handler_run.go`)
+
+```go
+func (d *ExplorationDomain) ApiV1CreateRun(c *gin.Context) {
+    // ... parse, validate workspace ...
+    var runID string
+    var shouldLaunch bool
+    d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+        if state.AgentRunning {
+            if len(state.Runs) > 0 {
+                runID = state.Runs[len(state.Runs)-1].ID
+            }
+            return
+        }
+        // create Run + Plan synchronously (fast, no I/O)
+        plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, state)
+        // ... append run, plan, steps to state ...
+        state.AgentRunning = true
+        shouldLaunch = true
+        runID = newRunID
+    })
+    if shouldLaunch {
+        go d.runAgentCycle(workspaceID)
+    }
+    // 202 Accepted for a newly started run; 200 OK for idempotent re-request (already running)
+    status := http.StatusAccepted
+    if !shouldLaunch {
+        status = http.StatusOK
+    }
+    c.JSON(status, RunResponse{...})
+}
+```
+
+### 6. `domain.go` — Agent construction
+
+```go
+func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *ExplorationDomain {
+    domain := &ExplorationDomain{ /* store, ws, runtime init */ }
+
+    if lm != nil {
+        g, _ := agents.NewGeneralAgent(ctx, lm)
+        r, _ := agents.NewResearchAgent(ctx, lm)  // nil if DuckDuckGo init fails
+        gr, _ := agents.NewGraphAgent(ctx, lm)
+        a, _ := agents.NewArtifactAgent(ctx, lm)
+        domain.planner = NewLLMPlanner(g, r, gr, a) // nil agents → fallback for that step
+        domain.General = g
+        domain.DeepAgent, _ = agents.NewExplorationAgent(ctx, lm) // kept, not used yet
+    } else {
+        domain.planner = NewDeterministicPlanner()
+        domain.General, _ = agents.NewGeneralAgent(ctx, nil)
+    }
+    return domain
+}
+```
+
+A nil agent field in `LLMPlanner` is treated identically to an agent call error — deterministic fallback is used for that step. No startup error is returned.
 
 ---
 
 ## Data Flow
 
 ```
-runAgentCycle goroutine
+ApiV1CreateRun (holds runtime.mu briefly)
+    └─ BuildInitialPlan (fast, delegates to DeterministicPlanner)
+    └─ set AgentRunning = true → return 202
+
+runAgentCycle goroutine (only used for new runs; other callers pass existing session copies directly)
     │
-    ├─ withWorkspaceState → read session graph state
+    ├─ snapshotForCycle (only called from runAgentCycle):
+    │       1. store.mu read lock → copy ExplorationSession → release
+    │       2. withWorkspaceState → copy RuntimeWorkspaceState fields → release
+    │       (never hold both locks simultaneously)
     │
-    ├─ LLMPlanner.GenerateNodesForCycle(ctx, session, state)
-    │       │
-    │       ├─ agent.Generate(ctx, prompt+context)
-    │       │       └─ ResearchAgent: may call DuckDuckGo tool internally
-    │       │
-    │       ├─ jsonrepair.Repair(output)
-    │       ├─ json.Unmarshal → []Node, []Edge
-    │       └─ fallback.generate*() on error
+    ├─ LLMPlanner.GenerateNodesForCycle(stepCtx 2min, &sessionCopy, &stateCopy)
+    │       ├─ select priority by condition table
+    │       ├─ build prompt with existing node IDs
+    │       ├─ agent.Run(stepCtx, input) → iter.Next() loop → extract lastContent
+    │       ├─ validate direction_ids, drop invalid
+    │       ├─ jsonrepair + json.Unmarshal → []Node, []Edge
+    │       └─ on error: fallback.generateXxx() directly
     │
-    ├─ applyGeneratedNodes(workspaceID, nodes, edges)
-    │       ├─ store.mu.Lock → append nodes/edges
-    │       ├─ diffMutations → MutationEvent list
-    │       └─ broadcastMutations → WebSocket push to all subscribers
+    ├─ applyGeneratedNodes → store.mu.Lock, diffMutations, broadcastMutations (WebSocket)
     │
-    └─ withWorkspaceState → mark step Done, update Running flag
+    └─ markStepDoneAndCheck → runtime.mu, mark step Done
+          if no more steps: AgentRunning=false, run.Status=Completed → break
 ```
 
 ---
 
 ## Error Handling
 
-- Agent call fails → log error, fall back to `DeterministicPlanner` for that node type, continue
-- JSON parse fails → `jsonrepair` first, then fallback
-- Goroutine panics → recover, set `state.Running = false`, broadcast `run_failed` mutation
-- `state.Running == true` when `CreateRun` called → return existing run_id, no new goroutine
+| Scenario | Behavior |
+|---|---|
+| Agent call error | Log; call specific `DeterministicPlanner.generateXxx()` for this priority; continue |
+| JSON parse failure | `jsonrepair` first; then `DeterministicPlanner.generateXxx()` |
+| All `direction_id` values invalid after validation | Treat as parse failure → fallback |
+| Agent is nil | Same as agent call error → fallback |
+| Step timeout (2 min) | Agent call cancelled → fallback for that step |
+| Total timeout (10 min) | All remaining pending steps use deterministic fallback via `executeRuntimeCycle` |
+| Goroutine panics | `recover()` → `AgentRunning=false`, `run.Status=RunStatusFailed`, broadcast `run_failed` |
+| `AgentRunning==true` on `CreateRun` | Return current run_id, no new goroutine |
+| Ticker fires while `AgentRunning==true` | `executeRuntimeCycle` returns immediately (skip guard) |
 
 ---
 
 ## What Is NOT Changed
 
-- `Planner` interface signature
-- `DeterministicPlanner` (kept as fallback)
+- `Planner` interface method signatures
+- `DeterministicPlanner` logic (no modifications)
 - WebSocket infrastructure (`broadcastMutations`, `wsState`)
-- `RuntimeWorkspaceState` struct fields
 - `RuntimeContextData` / context plumbing
 - All existing API route signatures and response shapes
-- Frontend — no changes needed (already subscribes to mutations via WebSocket)
+- Frontend (existing `node_added`/`node_updated` mutation handling unchanged; `run_completed`/`run_failed` are new kinds — frontend ignores unknown kinds)
 
 ---
 
@@ -155,19 +407,23 @@ runAgentCycle goroutine
 
 | File | Change |
 |---|---|
-| `backend/domain/exploration/planner_llm.go` | **New** — `LLMPlanner` implementation |
-| `backend/domain/exploration/domain.go` | Use `LLMPlanner` when model available; pass individual agents |
-| `backend/domain/exploration/runtime_agent.go` | Add `runAgentCycle` goroutine; update `executeNextTodoStepLocked` |
-| `backend/domain/exploration/handler_run.go` | `ApiV1CreateRun` non-blocking: sync init + async goroutine |
-| `backend/agents/` | No changes — agents already built correctly |
+| `backend/domain/exploration/planner_llm.go` | **New** — `LLMPlanner` + `NewLLMPlanner` |
+| `backend/domain/exploration/planner.go` | Remove lock-holding assumption from interface comment |
+| `backend/domain/exploration/domain.go` | Add `AgentRunning bool` to `RuntimeWorkspaceState`; use `LLMPlanner` when model available |
+| `backend/domain/exploration/runtime_agent.go` | Add `runAgentCycle`, `snapshotForCycle`, `markStepDoneAndCheck`; refactor all 4 `GenerateNodesForCycle` call sites out of `withWorkspaceState`; add ticker skip guard to `executeRuntimeCycle` |
+| `backend/domain/exploration/handler_run.go` | `ApiV1CreateRun`: sync init + async goroutine + `AgentRunning` check |
 | `backend/domain/exploration/runtime_llm.go` | Remove dead `generatePlanStepsWithModel` |
+| `backend/agents/` | No changes |
 
 ---
 
 ## Success Criteria
 
-- `POST /workspaces/:id/runs` returns 202 within ~100ms
-- Frontend receives WebSocket `node_added` events progressively as each agent step completes
-- Direction node titles/summaries are generated by LLM based on actual topic content
-- Evidence nodes reflect real search results (ResearchAgent + DuckDuckGo)
-- If LLM is unavailable (`model == nil`), system falls back to DeterministicPlanner with no degradation
+1. `POST /workspaces/:id/runs` returns 202 within 200ms (no LLM/network call on response path)
+2. After a run starts, frontend receives at least one `node_added` WebSocket event per plan step that completes (3 events for a full 3-step run)
+3. Direction node `Title` fields contain LLM-generated content specific to `session.Topic` (not "Explore X as a strategic direction")
+4. If `NewResearchAgent` fails at startup (nil research agent), Evidence nodes are still generated via deterministic fallback — server does not crash
+5. If `model == nil`, `DeterministicPlanner` is used end-to-end — all existing tests pass unchanged
+6. Concurrent `CreateRun` calls for the same workspace: second call returns 200 OK with the first run_id; only one goroutine runs
+7. After `POST /workspaces/:id/interventions`, the `replanned` mutation event is broadcast before any `node_added` events from the subsequent replan cycle
+8. A single agent call that hangs is cancelled after 2 minutes; the step completes via deterministic fallback; the run continues
