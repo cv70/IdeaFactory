@@ -8,7 +8,7 @@ export type ApiResponse<T> = {
 
 export type ExplorationPayload = {
   exploration: ExplorationSession
-  presentation: WorkbenchView
+  presentation: WorkbenchView | null
 }
 
 export type CreateExplorationRequest = ExplorationInput

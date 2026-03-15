@@ -179,23 +179,43 @@ function byBranch(session: ExplorationSession, branchId: string, type: Node['typ
 export function buildWorkbenchView(
   session: ExplorationSession,
   activeOpportunityId = session.activeOpportunityId,
-): WorkbenchView {
-  const opportunities = session.nodes.filter((node) => node.type === 'opportunity')
+): WorkbenchView | null {
+  // Support both old 'opportunity' and new 'direction' node types
+  const opportunities = session.nodes.filter(
+    (node) => node.type === 'opportunity' || node.type === 'direction',
+  )
+  if (opportunities.length === 0) return null
+
   const activeOpportunity =
     opportunities.find((node) => node.id === activeOpportunityId) ?? opportunities[0]
 
-  if (!activeOpportunity) {
-    throw new Error('No active opportunity found for the session.')
-  }
-
   const branchId = activeOpportunity.metadata.branchId ?? activeOpportunity.id
-  const ideaCards = byBranch(session, branchId, 'idea')
+
+  // Support both old question/hypothesis and new evidence type
+  const questionTrail = session.nodes.filter(
+    (node) =>
+      (node.type === 'question' || node.type === 'evidence') &&
+      node.metadata.branchId === branchId,
+  )
+  const hypothesisTrail = session.nodes.filter(
+    (node) => node.type === 'hypothesis' && node.metadata.branchId === branchId,
+  )
+
+  // Support both old idea and new claim/decision/artifact types
+  const ideaCards = session.nodes.filter(
+    (node) =>
+      (node.type === 'idea' ||
+        node.type === 'claim' ||
+        node.type === 'decision' ||
+        node.type === 'artifact') &&
+      node.metadata.branchId === branchId,
+  )
 
   return {
     opportunities,
     activeOpportunity,
-    questionTrail: byBranch(session, branchId, 'question'),
-    hypothesisTrail: byBranch(session, branchId, 'hypothesis'),
+    questionTrail,
+    hypothesisTrail,
     ideaCards,
     savedIdeas: ideaCards.filter((idea) => session.favorites.includes(idea.id)),
     runNotes: session.runs,

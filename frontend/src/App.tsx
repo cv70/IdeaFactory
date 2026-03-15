@@ -86,9 +86,7 @@ function App() {
 
   const savedIdeas = useMemo(() => {
     if (!exploration) return []
-    return exploration.nodes.filter(
-      (node) => node.type === 'idea' && exploration.favorites.includes(node.id),
-    )
+    return exploration.nodes.filter((node) => exploration.favorites.includes(node.id))
   }, [exploration])
 
   useEffect(() => {

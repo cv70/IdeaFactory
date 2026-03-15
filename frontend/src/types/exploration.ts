@@ -6,8 +6,22 @@ export type NodeType =
   | 'opportunity'
   | 'idea'
   | 'evidence'
+  | 'direction'
+  | 'claim'
+  | 'decision'
+  | 'unknown'
+  | 'artifact'
 
-export type EdgeType = 'supports' | 'refines' | 'leads_to' | 'expands'
+export type EdgeType =
+  | 'supports'
+  | 'refines'
+  | 'leads_to'
+  | 'expands'
+  | 'contradicts'
+  | 'justifies'
+  | 'branches_from'
+  | 'raises'
+  | 'resolves'
 
 export type NodeStatus = 'active' | 'draft'
 

@@ -36,15 +36,7 @@ function notFound(): ApiResponse<ExplorationPayload> {
         favorites: [],
         runs: [],
       },
-      presentation: {
-        opportunities: [],
-        activeOpportunity: undefined as never,
-        questionTrail: [],
-        hypothesisTrail: [],
-        ideaCards: [],
-        savedIdeas: [],
-        runNotes: [],
-      },
+      presentation: null,
     },
   }
 }
@@ -161,7 +153,9 @@ function normalizeEdge(raw: Record<string, unknown>): Edge {
 function toPayloadFromV1(workspace: V1WorkspaceResponse['workspace'], projection: V1ProjectionResponse['projection']): ExplorationPayload {
   const nodes = (projection.map.nodes ?? []).map((node) => normalizeNode(node, workspace.id))
   const edges = (projection.map.edges ?? []).map(normalizeEdge)
-  const opportunities = nodes.filter((node) => node.type === 'opportunity')
+  const opportunities = nodes.filter(
+    (node) => node.type === 'opportunity' || node.type === 'direction',
+  )
   const activeOpportunityId =
     projection.run_summary?.focus ??
     opportunities[0]?.id ??
