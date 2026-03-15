@@ -352,6 +352,19 @@ func (d *ExplorationDomain) executeNextTodoStepLocked(workspaceID string, now ti
 	return true
 }
 
+func subAgentForStep(index int) string {
+	switch index {
+	case 1:
+		return "research"
+	case 2:
+		return "graph"
+	case 3:
+		return "artifact"
+	default:
+		return "general"
+	}
+}
+
 // adjustBalanceForIntent adjusts BalanceState fields based on intent keyword scanning.
 // Adjustments accumulate; all fields are clamped to [0, 1].
 func adjustBalanceForIntent(prev BalanceState, intent string, now time.Time) BalanceState {
