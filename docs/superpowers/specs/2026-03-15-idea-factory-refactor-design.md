@@ -1,4 +1,4 @@
-# Idea Factory — Refactor & Runtime Semantics Design (v2)
+# Idea Factory — Refactor & Runtime Semantics Design (v3)
 
 **Date:** 2026-03-15
 **Scope:** Sub-project A (code structure) + Sub-project B (runtime semantics) — combined single-pass approach
@@ -31,34 +31,35 @@ Every existing file in `backend/domain/exploration/` is accounted for:
 
 | File | Action | Notes |
 |------|--------|-------|
-| `domain.go` | Modify | Replace `runtimeState` with `RuntimeWorkspaceState`; add `Planner` field |
+| `domain.go` | Modify | Replace `runtimeState`/`runtimeWorkspaces`; add `planner Planner` field; add accessor helpers |
 | `schema.go` | Modify | Add missing `NodeDirection`, `NodeArtifact`, `EdgeJustifies`, `EdgeBranchesFrom`, `EdgeRaises`, `EdgeResolves` constants |
-| `api_v1.go` | Split + Delete | Content distributed across `handler_workspace.go`, `handler_run.go`, `handler_intervention.go`, `projection_builder.go` |
-| `runtime_agent.go` | Modify | Calls `Planner` interface; writes mutation events; removes direct `runtimeState` map access |
-| `runtime_plan.go` | Delete | Content merged into `deterministic.go` |
-| `runtime_tasks.go` | Delete | Content merged into `deterministic.go` |
+| `api_v1.go` | Split + Delete | Content distributed across `handler_shared.go`, `handler_workspace.go`, `handler_run.go`, `handler_intervention.go`, `projection_builder.go` |
+| `runtime_agent.go` | Modify | Calls `Planner` interface; writes mutation events; removes direct `runtimeState` map access; adds `initializeWorkspaceGraph` |
+| `runtime_plan.go` | Delete + Split | `buildInitialPlan` logic moves to `deterministic.go`; `generatePlanStepsWithModel` (method on `ExplorationDomain`) moves to `runtime_llm.go` |
+| `runtime_tasks.go` | Delete | Content merged into `deterministic.go`; `dispatchPlanSteps` renamed to `executeFirstPlanStep` |
+| `runtime_llm.go` | Modify | Receives `generatePlanStepsWithModel` method (moved from `runtime_plan.go`) |
+| `workspace_management.go` | Modify | `ArchiveWorkspace`: replace `d.runtime.mu.Lock()`/delete calls with `withWorkspaceState` |
 | `mutations.go` | Unchanged | `diffMutations` and `mutationID` helpers stay as-is |
-| `workspace_management.go` | Modify | Update to use `RuntimeWorkspaceState` instead of `runtimeState` maps |
 | `runtime_context.go` | Unchanged | Utility types/functions; no changes needed |
-| `runtime_operator.go` | Unchanged | `RuntimeOperator` interface; used by `runtime_llm.go` |
-| `runtime_llm.go` | Unchanged | LLM path; not used by `DeterministicPlanner` |
-| `persistence.go` | Unchanged | Persistence layer; no changes needed |
-| `realtime.go` | Unchanged | WebSocket/SSE logic; no changes needed |
-| `cursor.go` | Unchanged | Cursor helpers; no changes needed |
-| `exploration.go` | Unchanged | Legacy route handlers; no changes needed |
-| `api.go` | Unchanged | Legacy route definitions; no changes needed |
-| `routes.go` | Unchanged | Route registration; no changes needed |
+| `runtime_operator.go` | Unchanged | `RuntimeOperator` interface |
+| `persistence.go` | Unchanged | Persistence layer |
+| `realtime.go` | Unchanged | WebSocket/SSE logic |
+| `cursor.go` | Unchanged | Cursor helpers |
+| `exploration.go` | Unchanged | Legacy route handlers |
+| `api.go` | Unchanged | Legacy route definitions |
+| `routes.go` | Unchanged | Route registration |
 
 **New files to create:**
 
 | File | Content |
 |------|---------|
-| `planner.go` | `Planner` interface + `ReplanTrigger` type |
-| `deterministic.go` | `DeterministicPlanner` struct implementing `Planner` |
-| `handler_workspace.go` | `ApiV1CreateWorkspace`, `ApiV1GetWorkspace` |
-| `handler_run.go` | `ApiV1CreateRun`, `ApiV1GetRun`, `ApiV1GetTraceSummary`, `ApiV1ListTraceEvents` |
-| `handler_intervention.go` | `ApiV1CreateIntervention`, `ApiV1GetIntervention`, `ApiV1ListInterventionEvents`, `mapInterventionReq`, `storeInterventionRecord`, `advanceInterventionByRuntimeEvent` |
-| `projection_builder.go` | `ApiV1GetProjection`, `buildProjectionResponse`, all projection helper functions |
+| `planner.go` | `Planner` interface, `ReplanTrigger`, `ReplanTriggerKind` constants |
+| `deterministic.go` | `DeterministicPlanner` struct implementing `Planner`; node + edge generation logic |
+| `handler_shared.go` | Shared handler utilities: `writeV1Error`, `toRFC3339` |
+| `handler_workspace.go` | `ApiV1CreateWorkspace`, `ApiV1GetWorkspace`, `toWorkspaceView` |
+| `handler_run.go` | Run handlers + run/trace helper functions (see Section 6) |
+| `handler_intervention.go` | Intervention handlers + intervention helper functions (see Section 6) |
+| `projection_builder.go` | `ApiV1GetProjection`, `buildProjectionResponse`, projection helpers |
 
 ---
 
@@ -66,7 +67,7 @@ Every existing file in `backend/domain/exploration/` is accounted for:
 
 ### 3.1 RuntimeWorkspaceState
 
-Replace `runtimeState`'s 10 loose maps with one cohesive struct per workspace:
+Replace the `runtimeState` struct and its 10 maps with one cohesive struct per workspace:
 
 ```go
 // domain.go
@@ -79,9 +80,14 @@ type RuntimeWorkspaceState struct {
     Balance       BalanceState
     Mutations     []MutationEvent
     ReplanReason  string
-    Interventions map[string]InterventionView  // keyed by intervention ID
+    Interventions map[string]InterventionView  // keyed by intervention ID; init to empty map
     Running       bool
     Cursor        int
+}
+
+type runtimeWorkspaces struct {
+    mu         sync.Mutex
+    workspaces map[string]*RuntimeWorkspaceState  // keyed by workspace ID
 }
 
 type ExplorationDomain struct {
@@ -92,29 +98,34 @@ type ExplorationDomain struct {
     store     *workspaceStore
     ws        *wsState
     planner   Planner
-    runtime   *runtimeWorkspaces   // replaces runtimeState
-}
-
-type runtimeWorkspaces struct {
-    mu         sync.Mutex
-    workspaces map[string]*RuntimeWorkspaceState  // keyed by workspace ID
+    runtime   *runtimeWorkspaces  // replaces old runtimeState
 }
 ```
 
-**Accessor pattern:** `runtime_agent.go` and `workspace_management.go` access runtime state through two helpers defined in `domain.go`:
+**Accessor helpers defined in `domain.go`:**
 
 ```go
-// getWorkspaceState returns state, initializing if absent.
+// getWorkspaceState returns the state for workspaceID, initializing it (with empty Interventions map) if absent.
+// Callers must hold runtime.mu before calling.
 func (d *ExplorationDomain) getWorkspaceState(workspaceID string) *RuntimeWorkspaceState
 
-// withWorkspaceState locks the mutex and calls fn with the state.
-// fn must not call other withWorkspaceState calls (no re-entry).
+// withWorkspaceState locks runtime.mu, fetches or initializes the state, calls fn, then unlocks.
+// fn MUST NOT call withWorkspaceState recursively.
 func (d *ExplorationDomain) withWorkspaceState(workspaceID string, fn func(*RuntimeWorkspaceState))
 ```
 
-`runtimeState` (the old struct) is removed entirely. All previous `d.runtime.runs[id]`, `d.runtime.plans[id]`, etc. usages are rewritten to use `state.Runs`, `state.Plans`, etc. via `withWorkspaceState`.
+**`Planner` methods are always called from within a `withWorkspaceState` callback.** This ensures all state mutations (appending nodes, updating balance, writing mutations) are covered by the lock.
 
-**Initialization:** `getWorkspaceState` lazily creates a `RuntimeWorkspaceState` with zero values and an empty `Interventions` map on first access.
+**`GetRuntimeState` and `QueryRuntimeState`** (public methods in `runtime_agent.go`) are updated to use `withWorkspaceState` internally, copying the relevant state fields out into the return value before the callback returns.
+
+**`ArchiveWorkspace` in `workspace_management.go`** replaces the two `d.runtime.mu.Lock()` / delete calls with:
+```go
+d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+    state.Running = false
+    state.Cursor = 0
+    state.Interventions = map[string]InterventionView{}
+})
+```
 
 ### 3.2 Planner Interface
 
@@ -131,19 +142,19 @@ const (
 
 type ReplanTrigger struct {
     Kind         ReplanTriggerKind
-    Intervention *InterventionView  // set when Kind == ReplanTriggerIntervention
+    Intervention *InterventionView  // non-nil when Kind == ReplanTriggerIntervention
 }
 
 type Planner interface {
-    // BuildInitialPlan creates the first plan for a workspace.
+    // BuildInitialPlan creates the first plan for a workspace. Called inside withWorkspaceState.
     BuildInitialPlan(ctx context.Context, session *ExplorationSession, state *RuntimeWorkspaceState) (*ExecutionPlan, []PlanStep, error)
 
-    // Replan creates a new plan version given the current runtime state and a trigger.
+    // Replan creates a new plan version. Called inside withWorkspaceState.
     Replan(ctx context.Context, session *ExplorationSession, state *RuntimeWorkspaceState, trigger ReplanTrigger) (*ExecutionPlan, []PlanStep, error)
 }
 ```
 
-`DeterministicPlanner` is a zero-dependency struct (no LLM, no Model field):
+`DeterministicPlanner` is a zero-dependency struct (no LLM, no Model):
 
 ```go
 // deterministic.go
@@ -151,34 +162,45 @@ type Planner interface {
 type DeterministicPlanner struct{}
 
 func NewDeterministicPlanner() *DeterministicPlanner { return &DeterministicPlanner{} }
+
+// Compile-time interface check
+var _ Planner = &DeterministicPlanner{}
 ```
 
-Domain is initialized with `NewDeterministicPlanner()` in `NewExplorationDomain`. `runtime_llm.go` (and its `generatePlanStepsWithModel`) is left unchanged as a separate, unused-by-default path.
+`NewExplorationDomain` sets `domain.planner = NewDeterministicPlanner()`.
 
-### 3.3 Node and Edge Type Constants (schema.go additions)
+### 3.3 Initial Workspace Graph Seeding
 
-Add to existing `NodeType` constants block (do NOT rename or remove existing constants):
+When `ApiV1CreateWorkspace` creates a new workspace, it must synchronously seed initial Direction nodes so the session is non-empty from the start. This is done by calling `initializeWorkspaceGraph` (a new function in `runtime_agent.go`) after the session is stored:
 
 ```go
-const (
-    // existing constants unchanged ...
-
-    NodeDirection NodeType = "direction"   // NEW
-    NodeArtifact  NodeType = "artifact"    // NEW
-)
+// runtime_agent.go
+// initializeWorkspaceGraph calls BuildInitialPlan, executes the first plan step synchronously,
+// and appends the generated Direction nodes to the session.
+// Must be called while NOT holding runtime.mu (it acquires its own lock via withWorkspaceState).
+func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, workspaceID string)
 ```
 
-Add to existing `EdgeType` constants block:
+`ApiV1CreateWorkspace` calls this after `d.store` is updated. The generated Direction nodes are visible in the projection response within the same HTTP request lifecycle.
+
+`TestV1ToggleFavoriteInterventionAffectsWorkspaceState` then finds `NodeDirection` nodes (not `NodeIdea`) and can favorite them.
+
+### 3.4 Node and Edge Type Constants (schema.go additions)
+
+Add to the existing `NodeType` constants block (do NOT rename or remove existing constants):
 
 ```go
-const (
-    // existing constants unchanged ...
+NodeDirection NodeType = "direction"   // NEW
+NodeArtifact  NodeType = "artifact"    // NEW
+```
 
-    EdgeJustifies    EdgeType = "justifies"     // NEW
-    EdgeBranchesFrom EdgeType = "branches_from" // NEW
-    EdgeRaises       EdgeType = "raises"         // NEW
-    EdgeResolves     EdgeType = "resolves"       // NEW
-)
+Add to the existing `EdgeType` constants block:
+
+```go
+EdgeJustifies    EdgeType = "justifies"      // NEW
+EdgeBranchesFrom EdgeType = "branches_from"  // NEW — used when replan generates new Direction from existing Direction
+EdgeRaises       EdgeType = "raises"          // NEW
+EdgeResolves     EdgeType = "resolves"        // NEW
 ```
 
 No existing constants are renamed or removed.
@@ -187,43 +209,43 @@ No existing constants are renamed or removed.
 
 ## 4. Node Generation Semantics
 
-`DeterministicPlanner` inspects the current graph (nodes in `ExplorationSession.Nodes`) and `RuntimeWorkspaceState.Balance` to decide what to generate. Each plan step, when executed by `runtime_agent.go`, produces new `Node` and `Edge` records that are appended to the session.
+`DeterministicPlanner` inspects the current graph (`ExplorationSession.Nodes` and `Edges`) and `RuntimeWorkspaceState.Balance` to decide what to generate each cycle. Generated nodes and edges are appended to the session by `executeFirstPlanStep` (called by `runtime_agent.go`).
 
-### 4.1 "Few Evidence" Threshold
+### 4.1 Definitions
 
-A Direction node has "sufficient Evidence" when `>= 2` Evidence nodes with edges to it exist. Fewer than 2 = "few Evidence."
+- **"few Evidence"**: a Direction node has `< 2` Evidence nodes with an edge pointing to it.
+- **"sufficient Evidence"**: a Direction node has `>= 2` Evidence nodes with an edge pointing to it.
+- **`Aggression > 0.6` (fast path)**: treats all Direction nodes as having sufficient Evidence when evaluating rules, bypassing the Evidence generation phase.
 
-### 4.2 Generation Rules (evaluated in priority order)
+### 4.2 Generation Rules (evaluated in priority order, first match wins)
 
 | Priority | Precondition | BalanceState condition | Action |
 |----------|-------------|----------------------|--------|
-| 1 | No Direction nodes exist | any | Generate 3–5 Direction nodes from topic words |
-| 2 | Direction nodes exist, any Direction has < 2 Evidence AND `Aggression <= 0.6` | `Research >= 0.5` | Generate 1–2 Evidence nodes per under-evidenced Direction |
-| 3 | Direction nodes exist, any Direction has < 2 Evidence AND `Aggression <= 0.6` | `Research < 0.5` | Generate 1 Artifact node summarizing current knowledge |
-| 4 | Direction nodes exist AND `Aggression > 0.6` (fast path) | any | Skip evidence; proceed directly to rule 5 |
-| 5 | Every active Direction has >= 2 Evidence, no Claim yet per Direction | any | Generate 1 Claim node per Direction (synthesizes Evidence) |
-| 6 | Claim nodes exist, `Divergence < 0.4` (converge mode), no Decision exists | any | Generate 1 Decision node resolving Claims |
-| 7 | Claim nodes exist, `Divergence >= 0.6` (diverge mode) | any | Generate 1–2 Unknown nodes representing open questions |
-| 8 | Decision node exists | any | Generate 1 Artifact node (final output); mark run complete |
+| 1 | No Direction nodes exist | any | Generate 3–5 Direction nodes derived from topic words |
+| 2 | Any Direction has few Evidence AND `Aggression <= 0.6` | `Research >= 0.5` | Generate 1–2 Evidence nodes per under-evidenced Direction |
+| 3 | Any Direction has few Evidence AND `Aggression <= 0.6` | `Research < 0.5` | Generate 1 Artifact node summarizing current knowledge |
+| 4 | `Aggression > 0.6` OR all Directions have sufficient Evidence; no Claim per Direction | any | Generate 1 Claim node per Direction (synthesizes Evidence) |
+| 5 | All Directions have a Claim; `Divergence < 0.4` (converge); no Decision exists | any | Generate 1 Decision node resolving Claims |
+| 6 | All Directions have a Claim; `Divergence >= 0.6` (diverge); no Unknown exists | any | Generate 1–2 Unknown nodes representing open questions |
+| 7 | Decision node exists | any | Generate 1 Artifact node (final output); mark step done |
 
-Rules are evaluated top-to-bottom; first matching rule wins.
+**Rule 4 clarification (Aggression fast path):** When `Aggression > 0.6`, Rules 2 and 3 are skipped regardless of their preconditions. Rule 4 is evaluated directly after Rule 1 fails. This means Evidence nodes are never generated in high-aggression mode; Claim nodes are generated directly from Directions.
 
 ### 4.3 Edge Generation
 
-Every newly generated node is connected to its parent(s):
-
-| New node type | Edge type | Connected to |
-|--------------|----------|--------------|
-| Evidence | `EdgeSupports` or `EdgeContradicts` (alternating per node for variety) | Parent Direction |
-| Claim | `EdgeJustifies` | Its most-recent Evidence node |
+| New node type | Edge type | Target |
+|--------------|----------|--------|
+| Direction (initial) | none | — |
+| Direction (from replan on existing Direction) | `EdgeBranchesFrom` | Parent Direction |
+| Evidence | `EdgeSupports` or `EdgeContradicts` (alternate per node) | Parent Direction |
+| Claim | `EdgeJustifies` | Most-recent Evidence node for that Direction (or Direction itself if no Evidence in fast-path) |
 | Decision | `EdgeJustifies` | All Claim nodes in the workspace |
-| Unknown | `EdgeRaises` | The Direction with fewest Evidence nodes |
-| Artifact | `EdgeResolves` | The Decision node (if exists), or the most-recent Claim |
-| Direction | none | — |
+| Unknown | `EdgeRaises` | Direction with fewest Evidence nodes |
+| Artifact | `EdgeResolves` | Decision node if exists, else most-recent Claim |
 
 ### 4.4 BalanceState Adjustment from Interventions
 
-When an intervention is submitted, its `intent` text is scanned (case-insensitive substring match) to adjust `BalanceState.Divergence`, `Research`, and `Aggression` before `Replan` is called. All values are clamped to [0.0, 1.0].
+When an intervention is submitted, scan its `intent` text (case-insensitive substring match) and accumulate adjustments to `BalanceState`, then call `Replan`. All values clamped to [0.0, 1.0].
 
 | Keyword | Field | Delta |
 |---------|-------|-------|
@@ -234,71 +256,108 @@ When an intervention is submitted, its `intent` text is scanned (case-insensitiv
 | "fast", "quick", "aggressive" | Aggression | +0.2 |
 | "careful", "thorough", "prudent" | Aggression | −0.2 |
 
-Multiple keywords may match; adjustments accumulate.
-
 ---
 
 ## 5. Mutation Events
 
-Use the existing `MutationEvent` struct (defined in `schema.go`) and the existing `mutationID` helper (in `mutations.go`). The runtime path appends to `RuntimeWorkspaceState.Mutations` and fans out to subscribers via the existing `realtime.go` broadcast mechanism.
+Use the existing `MutationEvent` struct (in `schema.go`) and the existing `mutationID` helper (in `mutations.go`). `runtime_agent.go` appends events to `state.Mutations` inside `withWorkspaceState`, then broadcasts via `realtime.go` after releasing the lock.
 
 ### 5.1 New Event Kinds
 
-These events are emitted by `runtime_agent.go` using existing `MutationEvent` fields:
-
-| When | `Kind` string | Payload fields used |
-|------|--------------|-------------------|
+| When | `Kind` string | `MutationEvent` fields used |
+|------|--------------|---------------------------|
 | Run record created | `"run_created"` | `Run *GenerationRun` |
-| BalanceState adjusted by intervention | `"balance_updated"` | (no standard field; store adjustment summary in future `Reason` field — for now emit event with just Kind + WorkspaceID) |
-| Intervention absorbed into runtime | `"intervention_absorbed"` | `ActiveOpportunityID` = intervention ID (repurposed as a string carrier) |
+| BalanceState adjusted by intervention | `"balance_updated"` | `WorkspaceID` only (MVP: no additional payload field) |
+| Intervention absorbed | `"intervention_absorbed"` | `ActiveOpportunityID` set to intervention ID |
 | Replan triggered | `"replanned"` | `Run *GenerationRun` of the new plan's associated run |
 
-**Note:** Node and edge generation mutations are handled by calling `diffMutations(prevSession, nextSession, "runtime")` after each cycle, which already emits `"node_added"` and `"edge_added"` events. Do not emit a separate `"nodes_generated"` event.
+**Node and edge mutation events** are produced by calling `diffMutations(prevSession, nextSession, "runtime")` after each cycle. This emits `"node_added"` and `"edge_added"` events through the existing mechanism. No separate `"nodes_generated"` event is needed.
 
-### 5.2 Where Events Are Written
-
-In `runtime_agent.go`, after each of the following operations:
+### 5.2 Broadcast Flow
 
 ```
-CreateRun → emit "run_created"
-Intervention absorbed → emit "intervention_absorbed" then call diffMutations
-BalanceState adjusted → emit "balance_updated"
-Replan executed → emit "replanned"
-Run cycle completes (nodes/edges added) → call diffMutations(prev, next, "runtime") and broadcast results
+withWorkspaceState → append events to state.Mutations
+→ release lock
+→ broadcastMutations(workspaceID, newEvents)  // realtime.go
 ```
-
-All events are appended to `state.Mutations` and passed to `broadcastMutations(workspaceID, events)` from `realtime.go`.
 
 ---
 
 ## 6. File Split: api_v1.go → handler_*.go + projection_builder.go
 
-`api_v1.go` is split by responsibility. Function bodies are not modified during the move.
+Function bodies are not modified during the move. Each destination file includes all private helpers required by its exported handlers.
 
-| Destination | Functions moved |
-|-------------|----------------|
-| `handler_workspace.go` | `ApiV1CreateWorkspace`, `ApiV1GetWorkspace` |
-| `handler_run.go` | `ApiV1CreateRun`, `ApiV1GetRun`, `ApiV1GetTraceSummary`, `ApiV1ListTraceEvents` |
-| `handler_intervention.go` | `ApiV1CreateIntervention`, `ApiV1GetIntervention`, `ApiV1ListInterventionEvents`, `mapInterventionReq`, `storeInterventionRecord`, `advanceInterventionByRuntimeEvent` |
-| `projection_builder.go` | `ApiV1GetProjection`, `buildProjectionResponse` and all helper functions |
+### handler_shared.go
+Shared utilities used by multiple handler files:
+- `writeV1Error(c *gin.Context, code int, errCode, msg string)`
+- `toRFC3339(ms int64) string`
 
-`api_v1.go` is deleted after the split. Route registration stays in `routes.go`.
+### handler_workspace.go
+- `ApiV1CreateWorkspace`
+- `ApiV1GetWorkspace`
+- `toWorkspaceView(session *ExplorationSession) WorkspaceView`
 
-`handler_intervention.go` accesses runtime state through the `withWorkspaceState` accessor defined in Section 3.1. The `storeInterventionRecord` and `advanceInterventionByRuntimeEvent` functions are updated to use `state.Interventions[id]` instead of `d.runtime.intervention[workspaceID][id]`.
+### handler_run.go
+Exported handlers:
+- `ApiV1CreateRun`
+- `ApiV1GetRun`
+- `ApiV1GetTraceSummary`
+- `ApiV1ListTraceEvents`
 
-**File size guidance:** Target < 400 lines per new handler file. `projection_builder.go` may reach ~300 lines given all the projection helpers it contains; this is acceptable.
+Private helpers:
+- `buildRunView`
+- `buildTraceSummary`
+- `applyTracePagination`
+- `isValidTraceCategory`
+- `isValidTraceLevel`
+- `normalizeRunStatus`
+- `normalizeStepStatus`
+- `normalizeAgentName`
+- `derivePlanStatus`
+- `deriveRunStatus`
+- `inferAgentFromStep`
+- `indexOfPlan`
+
+### handler_intervention.go
+Exported handlers:
+- `ApiV1CreateIntervention`
+- `ApiV1GetIntervention`
+- `ApiV1ListInterventionEvents`
+
+Private helpers:
+- `mapInterventionReq`
+- `storeInterventionRecord`
+- `advanceInterventionByRuntimeEvent`
+- `getInterventionRecord`
+- `listInterventionEvents`
+- `decodeInterventionEventView`
+- `applyEventPagination`
+- `findStartIndexByCursor`
+- `encodeEventCursor`
+
+`storeInterventionRecord` and `advanceInterventionByRuntimeEvent` access runtime state through `d.withWorkspaceState(..., func(state) { state.Interventions[id] = ... })` instead of the old `d.runtime.intervention[wid][id]` pattern.
+
+### projection_builder.go
+- `ApiV1GetProjection`
+- `buildProjectionResponse`
+- `buildRunSummaryView`
+- `buildInterventionEffects`
+- `buildRecentChanges` (if present)
+- Any other helper functions called only by projection building
+
+`api_v1.go` is deleted after all functions are moved.
 
 ---
 
 ## 7. Renames
 
-| Old name | New name | Reason |
-|----------|----------|--------|
-| `dispatchPlanSteps` | `executeFirstPlanStep` | MVP only executes first step; name must reflect this |
-| `runtime_plan.go` | merged into `deterministic.go` | file is eliminated |
-| `runtime_tasks.go` | merged into `deterministic.go` | file is eliminated |
-
-`runtime_llm.go` stays as-is. `DeterministicPlanner` does not call `generatePlanStepsWithModel`.
+| Old location / name | New location / name | Reason |
+|---------------------|---------------------|--------|
+| `runtime_plan.go` → `dispatchPlanSteps` | `runtime_agent.go` (inlined or renamed) → `executeFirstPlanStep` | Only first step executed in MVP |
+| `runtime_plan.go` → `buildInitialPlan` (package func) | `deterministic.go` → `DeterministicPlanner.BuildInitialPlan` | Moved to interface implementation |
+| `runtime_plan.go` → `buildInitialBalance` | `deterministic.go` (kept as package-private helper) | Referenced only by DeterministicPlanner |
+| `runtime_plan.go` → `generatePlanStepsWithModel` (method on `*ExplorationDomain`) | `runtime_llm.go` | Stays as domain method; file preserved as LLM extension point |
+| `runtime_tasks.go` → entire file | `deterministic.go` (merged) | File eliminated; step execution logic integrated |
 
 ---
 
@@ -306,11 +365,11 @@ All events are appended to `state.Mutations` and passed to `broadcastMutations(w
 
 ### 8.1 Existing tests (must stay green)
 
-All HTTP-level tests in `api_test.go` test through the HTTP interface and must remain green. No API response shapes change.
+All HTTP-level tests in `api_test.go` test through the HTTP interface and must remain green with no API response shape changes.
 
-### 8.2 Tests that access `domain.runtime.*` directly
+### 8.2 Tests that access internal state directly
 
-`TestV1InterventionCanRecoverFromDB` accesses `domain.runtime.intervention` directly to simulate a restart. Update this test to use the new accessor:
+**`TestV1InterventionCanRecoverFromDB`** accesses `domain.runtime.intervention`. This test already skips in CI (`if domain.DB == nil { t.Skip(...) }`). Update the internal access to use the new accessor regardless:
 
 ```go
 // Before:
@@ -324,7 +383,7 @@ domain.withWorkspaceState(created.Workspace.ID, func(state *RuntimeWorkspaceStat
 })
 ```
 
-`TestV1ToggleFavoriteInterventionAffectsWorkspaceState` checks for `NodeIdea`. Update to check for `NodeDirection` instead, since the deterministic planner now generates Direction nodes as the primary type:
+**`TestV1ToggleFavoriteInterventionAffectsWorkspaceState`** checks for `NodeIdea`. Change to `NodeDirection`:
 
 ```go
 // Before:
@@ -333,36 +392,39 @@ if node.Type == NodeIdea {
 if node.Type == NodeDirection {
 ```
 
+This is valid because `initializeWorkspaceGraph` (called during `ApiV1CreateWorkspace`) now seeds Direction nodes synchronously, so a Direction node is guaranteed to exist after workspace creation.
+
 ### 8.3 New tests to add
 
-- `TestDeterministicPlannerInitialRun` — verifies first run produces Direction nodes; no Evidence/Claim/Decision nodes yet
-- `TestDeterministicPlannerResearchPhase` — verifies second run with default `Balance.Research >= 0.5` produces Evidence nodes with `EdgeSupports` edges to Direction nodes
+- `TestDeterministicPlannerInitialRun` — verifies first run produces Direction nodes; no Evidence/Claim/Decision present
+- `TestDeterministicPlannerResearchPhase` — verifies second run with `Balance.Research >= 0.5` produces Evidence nodes with `EdgeSupports` edges to Direction nodes
+- `TestDeterministicPlannerFastPath` — verifies that `Aggression > 0.6` skips Evidence and generates Claim nodes directly
 - `TestDeterministicPlannerConvergence` — verifies Claim nodes generated when all Directions have >= 2 Evidence; Decision generated when `Divergence < 0.4`
-- `TestInterventionAdjustsBalanceState` — verifies keyword "收敛" in intent shifts `Divergence` down by 0.2 before replan
-- `TestMutationEventsWrittenOnRunComplete` — verifies `state.Mutations` is non-empty after a completed run cycle
+- `TestInterventionAdjustsBalanceState` — verifies keyword "收敛" in intent shifts `Divergence` down by 0.2; `Balance.Divergence` observable via `GetRuntimeState`
+- `TestMutationEventsWrittenOnRunComplete` — verifies `state.Mutations` is non-empty after a completed run; at minimum `"run_created"` and `"node_added"` events are present
 
 ---
 
 ## 9. Out of Scope
 
-- LLM-backed planner (remains a future extension point via the `Planner` interface; `runtime_llm.go` is preserved unchanged)
-- Frontend rendering changes beyond verifying existing node type display works
+- LLM-backed planner (preserved via `runtime_llm.go`; `DeterministicPlanner` does not call it)
+- Frontend rendering changes
 - Database persistence (runtime state remains in-memory)
-- Authentication, multi-user, or workspace sharing
-- BalanceState change to enum types (kept as float64; enum refactor is a separate sub-project)
+- Authentication, multi-user, workspace sharing
+- BalanceState change to enum types (kept as float64)
 - Changes to `exploration.go`, `api.go`, `persistence.go`, `realtime.go`, `cursor.go`, `runtime_context.go`, `runtime_operator.go`, `mutations.go`
 
 ---
 
 ## 10. Acceptance Criteria
 
-1. `go test ./domain/exploration/...` — all tests pass (including updated `TestV1InterventionCanRecoverFromDB` and `TestV1ToggleFavoriteInterventionAffectsWorkspaceState`)
+1. `go test ./domain/exploration/...` — all tests pass (including updated internal-access tests)
 2. `npm test` — all frontend tests pass
-3. A fresh run on a new workspace produces Direction nodes (type `"direction"`) in the projection response
+3. `ApiV1CreateWorkspace` response includes `NodeDirection` nodes in the projection (seeded by `initializeWorkspaceGraph`)
 4. Evidence nodes appear after the second run cycle and have `EdgeSupports` edges to Direction nodes
-5. Submitting an intervention with intent containing "收敛" reduces `BalanceState.Divergence` by 0.2 (observable via trace or direct state check in test)
+5. Submitting an intervention with intent "收敛" reduces `BalanceState.Divergence` by 0.2 (verified by `TestInterventionAdjustsBalanceState`)
 6. `state.Mutations` is non-empty after a completed run (verified by `TestMutationEventsWrittenOnRunComplete`)
-7. `api_v1.go` is deleted; `runtime_plan.go` and `runtime_tasks.go` are deleted
-8. `DeterministicPlanner` implements the `Planner` interface (verified by compiler: `var _ Planner = &DeterministicPlanner{}`)
+7. `api_v1.go`, `runtime_plan.go`, `runtime_tasks.go` are deleted
+8. `var _ Planner = &DeterministicPlanner{}` compiles without error
 9. No new file created in this PR exceeds 400 lines
-10. `withWorkspaceState` is the only path for mutating `RuntimeWorkspaceState` fields in handler and runtime files
+10. All runtime state mutations go through `withWorkspaceState`; no code accesses `d.runtime.workspaces[id]` directly outside `domain.go`
