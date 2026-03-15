@@ -17,8 +17,8 @@ var (
 )
 
 func (d *IdeaDomain) GenerateIdeas(req GenerateIdeasReq) (GenerateIdeasResp, error) {
-	if d.LLM != nil {
-		agent := IdeaGenerationAgent{Model: d.LLM}
+	if d.Model != nil {
+		agent := IdeaGenerationAgent{Model: d.Model}
 		resp, err := agent.RunGenerate(context.Background(), req)
 		if err == nil && len(resp.Clusters) > 0 {
 			return resp, nil

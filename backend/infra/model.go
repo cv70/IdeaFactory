@@ -13,11 +13,11 @@ import (
 	"github.com/cloudwego/eino/components/model"
 )
 
-func NewLLM(ctx context.Context, config *config.LLMConfig, options ...func(*qwen.ChatModelConfig)) (model.ToolCallingChatModel, error) {
-	qwenConfig := &qwen.ChatModelConfig{}
-	buildQwenModelOptionalConfig(qwenConfig, config)
-	for _, opt := range options {
-		opt(qwenConfig)
+func NewModel(ctx context.Context, config *config.ModelConfig, options ...func(*qwen.ChatModelConfig)) (model.ToolCallingChatModel, error) {
+	qwenConfig := &qwen.ChatModelConfig{
+		BaseURL: config.BaseURL,
+		Model:   config.Model,
+		APIKey:  config.APIKey,
 	}
 	chatModel, err := qwen.NewChatModel(ctx, qwenConfig)
 	return chatModel, err
@@ -75,18 +75,4 @@ func LLMWithResponseFormat(responseFormat *openai.ChatCompletionResponseFormat) 
 	return func(c *qwen.ChatModelConfig) {
 		c.ResponseFormat = responseFormat
 	}
-}
-
-func buildQwenModelOptionalConfig(dstConfig *qwen.ChatModelConfig, srcConfig *config.LLMConfig) {
-	if dstConfig == nil || srcConfig == nil {
-		return
-	}
-	dstConfig.BaseURL = srcConfig.BaseURL
-	dstConfig.Model = srcConfig.Model
-	dstConfig.Timeout = srcConfig.Timeout
-	dstConfig.MaxTokens = srcConfig.MaxTokens
-	dstConfig.Temperature = srcConfig.Temperature
-	dstConfig.TopP = srcConfig.TopP
-	dstConfig.PresencePenalty = srcConfig.PresencePenalty
-	dstConfig.FrequencyPenalty = srcConfig.FrequencyPenalty
 }

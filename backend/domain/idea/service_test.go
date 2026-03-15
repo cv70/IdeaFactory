@@ -1,26 +1,12 @@
 package idea
 
 import (
-	"backend/config"
-	"backend/infra"
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/cv70/pkgo/mistake"
 )
 
 func TestGenerateIdeasProducesClustersAndCards(t *testing.T) {
-	cfg, err := config.LoadConfig()
-	mistake.Unwrap(err)
-	ctx := context.Background()
-	r, err := infra.NewRegistry(ctx, cfg)
-	mistake.Unwrap(err)
-
-	d := IdeaDomain{
-		DB: r.DB,
-		LLM: r.LLM,
-	}
+	d := newTestIdeaDomain()
 
 	resp, err := d.GenerateIdeas(GenerateIdeasReq{
 		Topic: "AI education",
@@ -68,16 +54,7 @@ func TestGenerateIdeasProducesClustersAndCards(t *testing.T) {
 }
 
 func TestGenerateIdeasAvoidsDuplicateNames(t *testing.T) {
-	cfg, err := config.LoadConfig()
-	mistake.Unwrap(err)
-	ctx := context.Background()
-	r, err := infra.NewRegistry(ctx, cfg)
-	mistake.Unwrap(err)
-
-	d := IdeaDomain{
-		DB: r.DB,
-		LLM: r.LLM,
-	}
+	d := newTestIdeaDomain()
 
 	resp, err := d.GenerateIdeas(GenerateIdeasReq{
 		Topic: "pet economy",
@@ -100,16 +77,7 @@ func TestGenerateIdeasAvoidsDuplicateNames(t *testing.T) {
 }
 
 func TestExpandIdeasProducesVariants(t *testing.T) {
-	cfg, err := config.LoadConfig()
-	mistake.Unwrap(err)
-	ctx := context.Background()
-	r, err := infra.NewRegistry(ctx, cfg)
-	mistake.Unwrap(err)
-
-	d := IdeaDomain{
-		DB: r.DB,
-		LLM: r.LLM,
-	}
+	d := newTestIdeaDomain()
 
 	resp, err := d.ExpandIdeas(ExpandIdeasReq{
 		Topic:      "creator economy",
@@ -133,7 +101,7 @@ func TestExpandIdeasProducesVariants(t *testing.T) {
 }
 
 func TestRegenerateClusterProducesCards(t *testing.T) {
-	d := IdeaDomain{}
+	d := newTestIdeaDomain()
 
 	resp, err := d.RegenerateCluster(RegenerateClusterReq{
 		Topic:     "creator economy",
@@ -153,7 +121,7 @@ func TestRegenerateClusterProducesCards(t *testing.T) {
 }
 
 func TestFavoriteCRUD(t *testing.T) {
-	d := IdeaDomain{}
+	d := newTestIdeaDomain()
 
 	card := IdeaCard{
 		ID:              "fav-1",

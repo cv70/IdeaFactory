@@ -1,9 +1,11 @@
 package exploration
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,6 +19,7 @@ func (d *ExplorationDomain) ApiV1CreateRun(c *gin.Context) {
 			return
 		}
 	}
+
 	snapshot, ok := d.GetWorkspace(workspaceID)
 	if !ok {
 		writeV1Error(c, http.StatusNotFound, "not_found", "workspace not found")
@@ -27,15 +30,82 @@ func (d *ExplorationDomain) ApiV1CreateRun(c *gin.Context) {
 	if source == "" {
 		source = "manual"
 	}
-	d.executeRuntimeCycle(snapshot.Exploration, source)
 
-	state, ok := d.GetRuntimeState(workspaceID)
-	if !ok || len(state.Runs) == 0 {
+	var runID string
+	var shouldLaunch bool
+	ctx := c.Request.Context()
+	session := snapshot.Exploration
+
+	// Call BuildInitialPlan OUTSIDE withWorkspaceState: LLMPlanner delegates to
+	// DeterministicPlanner (fast, no I/O). Pass empty state — RunID patching happens inside lock below.
+	plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, &RuntimeWorkspaceState{})
+
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		if state.AgentRunning {
+			if len(state.Runs) > 0 {
+				runID = state.Runs[len(state.Runs)-1].ID
+			}
+			return
+		}
+		now := time.Now()
+		runID = fmt.Sprintf("run-%s-%d", workspaceID, now.UnixNano())
+		run := Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			Source:      source,
+			Status:      RunStatusRunning,
+			StartedAt:   now.UnixMilli(),
+		}
+		state.Runs = append(state.Runs, run)
+		if state.Balance.WorkspaceID == "" {
+			state.Balance = buildInitialBalance(session, runID, now)
+		}
+		if plan != nil {
+			// Patch RunID (BuildInitialPlan was called before the run was created)
+			plan.RunID = runID
+			for i := range steps {
+				steps[i].RunID = runID
+			}
+			if len(state.Plans) > 0 {
+				plan.Version = state.Plans[len(state.Plans)-1].Version + 1
+			}
+			state.Plans = append(state.Plans, *plan)
+			state.PlanSteps = append(state.PlanSteps, steps...)
+		}
+		state.Mutations = append(state.Mutations, MutationEvent{
+			ID:          mutationID(workspaceID),
+			WorkspaceID: workspaceID,
+			Kind:        "run_created",
+			Run:         &GenerationRun{ID: runID},
+			CreatedAt:   now.UnixMilli(),
+		})
+		state.AgentRunning = true
+		shouldLaunch = true
+	})
+
+	if shouldLaunch {
+		go d.runAgentCycle(workspaceID)
+	}
+
+	// Fetch run view for response
+	runtimeState, ok := d.GetRuntimeState(workspaceID)
+	if !ok || runID == "" {
 		writeV1Error(c, http.StatusInternalServerError, "internal", "failed to create run")
 		return
 	}
-	latest := state.Runs[len(state.Runs)-1]
-	c.JSON(http.StatusAccepted, RunResponse{Run: d.buildRunView(state, latest)})
+	var targetRun Run
+	for _, r := range runtimeState.Runs {
+		if r.ID == runID {
+			targetRun = r
+			break
+		}
+	}
+
+	status := http.StatusAccepted
+	if !shouldLaunch {
+		status = http.StatusOK
+	}
+	c.JSON(status, RunResponse{Run: d.buildRunView(runtimeState, targetRun)})
 }
 
 func (d *ExplorationDomain) ApiV1GetRun(c *gin.Context) {

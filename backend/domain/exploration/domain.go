@@ -3,6 +3,7 @@ package exploration
 import (
 	"backend/agents"
 	"backend/datasource/dbdao"
+	"backend/infra"
 	"context"
 	"sync"
 
@@ -24,6 +25,7 @@ type RuntimeWorkspaceState struct {
 	ReplanReason  string
 	Interventions map[string]InterventionView // keyed by intervention ID
 	Running       bool
+	AgentRunning  bool // true while runAgentCycle goroutine is active
 	Cursor        int
 }
 
@@ -80,11 +82,11 @@ func (d *ExplorationDomain) withWorkspaceState(workspaceID string, fn func(*Runt
 	d.runtime.mu.Unlock()
 }
 
-func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *ExplorationDomain {
+func BuildExplorationDomain(registry *infra.Registry) (*ExplorationDomain, error) {
+	ctx := context.Background()
 	domain := &ExplorationDomain{
-		DB:      db,
-		Model:   lm,
-		planner: NewDeterministicPlanner(),
+		DB:    registry.DB,
+		Model: registry.Model,
 		store: &workspaceStore{
 			workspaces: map[string]*ExplorationSession{},
 		},
@@ -95,17 +97,25 @@ func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *Explorat
 			workspaces: map[string]*RuntimeWorkspaceState{},
 		},
 	}
-	if lm != nil {
-		if agent, err := agents.NewExplorationAgent(context.Background(), lm); err == nil {
-			domain.DeepAgent = agent
-		}
-		if general, err := agents.NewGeneralAgent(context.Background(), lm); err == nil {
-			domain.General = general
-		}
-	} else {
-		if general, err := agents.NewGeneralAgent(context.Background(), nil); err == nil {
-			domain.General = general
-		}
+
+	g, err := agents.NewGeneralAgent(ctx, registry.Model)
+	if err != nil {
+		return nil, err
 	}
-	return domain
+	r, err := agents.NewResearchAgent(ctx, registry.Model)
+	if err != nil {
+		return nil, err
+	}
+	gr, err := agents.NewGraphAgent(ctx, registry.Model)
+	if err != nil {
+		return nil, err
+	}
+	a, err := agents.NewArtifactAgent(ctx, registry.Model)
+	if err != nil {
+		return nil, err
+	}
+	domain.planner = NewLLMPlanner(g, r, gr, a)
+	domain.General = g
+	domain.DeepAgent, err = agents.NewExplorationAgent(ctx, registry.Model)
+	return domain, err
 }

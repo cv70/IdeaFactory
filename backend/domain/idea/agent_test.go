@@ -1,13 +1,27 @@
 package idea
 
 import (
+	"backend/config"
+	"backend/infra"
 	"context"
 	"errors"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cv70/pkgo/mistake"
 )
+
+func newTestIdeaDomain() *IdeaDomain {
+	ctx := context.Background()
+	c, err := config.LoadConfig()
+	mistake.Unwrap(err)
+	r, err := infra.NewRegistry(ctx, c)
+	mistake.Unwrap(err)
+	id, err := BuildIdeaDomain(r)
+	mistake.Unwrap(err)
+	return id
+}
 
 type fakeToolCallingModel struct {
 	replies []string
@@ -36,14 +50,7 @@ func (f *fakeToolCallingModel) WithTools(tools []*schema.ToolInfo) (model.ToolCa
 }
 
 func TestGenerateIdeasUsesAgentWhenLLMAvailable(t *testing.T) {
-	m := &fakeToolCallingModel{
-		replies: []string{
-			`{"round":1,"focuses":["audience","scenario"],"cluster_targets":{"audience":3,"scenario":3}}`,
-			`{"clusters":[{"cluster_id":"audience","title":"Audience Slice","ideas":[{"id":"a1","name":"Agent Idea A1","one_liner":"A1","target_audience":"founders","core_scenario":"planning","value_point":"speed","business_tags":["tool"],"opportunity_tags":["niche"]},{"id":"a2","name":"Agent Idea A2","one_liner":"A2","target_audience":"operators","core_scenario":"planning","value_point":"speed","business_tags":["tool"],"opportunity_tags":["niche"]},{"id":"a3","name":"Agent Idea A3","one_liner":"A3","target_audience":"teams","core_scenario":"planning","value_point":"speed","business_tags":["tool"],"opportunity_tags":["niche"]}]},{"cluster_id":"scenario","title":"Scenario Slice","ideas":[{"id":"s1","name":"Agent Idea S1","one_liner":"S1","target_audience":"founders","core_scenario":"launch","value_point":"clarity","business_tags":["service"],"opportunity_tags":["efficiency"]},{"id":"s2","name":"Agent Idea S2","one_liner":"S2","target_audience":"operators","core_scenario":"retention","value_point":"clarity","business_tags":["service"],"opportunity_tags":["efficiency"]},{"id":"s3","name":"Agent Idea S3","one_liner":"S3","target_audience":"teams","core_scenario":"growth","value_point":"clarity","business_tags":["service"],"opportunity_tags":["efficiency"]}]}]}`,
-			`{"reject_names":[],"next_focuses":["motivation"],"quality_score":4.2,"duplicate_rate":0.0}`,
-		},
-	}
-	d := IdeaDomain{LLM: m}
+	d := newTestIdeaDomain()
 
 	resp, err := d.GenerateIdeas(GenerateIdeasReq{
 		Topic: "creator economy",
@@ -76,7 +83,8 @@ func TestGenerateIdeasUsesAgentWhenLLMAvailable(t *testing.T) {
 }
 
 func TestGenerateIdeasFallbackWhenAgentFails(t *testing.T) {
-	d := IdeaDomain{LLM: &fakeToolCallingModel{fail: true}}
+	d := newTestIdeaDomain()
+
 	resp, err := d.GenerateIdeas(GenerateIdeasReq{
 		Topic: "pet economy",
 		Count: 8,

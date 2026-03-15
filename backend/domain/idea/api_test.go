@@ -10,10 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func newTestIdeaDomain() *IdeaDomain {
-	return &IdeaDomain{}
-}
-
 func TestApiRegenerateClusterSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

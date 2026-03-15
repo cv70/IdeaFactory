@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -1259,5 +1260,62 @@ func TestRuntimeCycleAddsEvidenceNodes(t *testing.T) {
 	}
 	if evCount == 0 {
 		t.Errorf("expected Evidence nodes after executeRuntimeCycle, got none (total nodes: %d)", len(ws2.Exploration.Nodes))
+	}
+}
+
+func TestCreateRun_Returns202Immediately(t *testing.T) {
+	r, domain := newTestRouterWithDomain()
+
+	// Create a workspace first
+	createBody := []byte(`{"topic":"AI education","output_goal":"Research"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created WorkspaceResponse
+	json.Unmarshal(w.Body.Bytes(), &created)
+	wsID := created.Workspace.ID
+
+	// POST create run — must return 202 quickly (no blocking LLM calls)
+	runReq, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID+"/runs", nil)
+	runW := httptest.NewRecorder()
+	start := time.Now()
+	r.ServeHTTP(runW, runReq)
+	elapsed := time.Since(start)
+
+	if runW.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", runW.Code, runW.Body.String())
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("CreateRun took too long: %v (should be <500ms)", elapsed)
+	}
+	_ = domain
+}
+
+func TestCreateRun_IdempotentWhenAlreadyRunning(t *testing.T) {
+	r, domain := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"Blockchain","output_goal":"Summary"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var created WorkspaceResponse
+	json.Unmarshal(w.Body.Bytes(), &created)
+	wsID := created.Workspace.ID
+
+	// Simulate AgentRunning = true
+	domain.withWorkspaceState(wsID, func(s *RuntimeWorkspaceState) {
+		runID := "existing-run-id"
+		s.Runs = []Run{{ID: runID, WorkspaceID: wsID, Status: RunStatusRunning, StartedAt: time.Now().UnixMilli()}}
+		s.AgentRunning = true
+	})
+
+	runReq, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces/"+wsID+"/runs", nil)
+	runW := httptest.NewRecorder()
+	r.ServeHTTP(runW, runReq)
+
+	if runW.Code != http.StatusOK {
+		t.Fatalf("expected 200 for idempotent re-request, got %d", runW.Code)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"backend/config"
 	"backend/domain/exploration"
 	"backend/domain/idea"
-	"backend/domain/user"
 	"backend/infra"
 	"context"
 
@@ -27,17 +26,12 @@ func main() {
 	r := gin.Default()
 	v1 := r.Group("/api/v1")
 
-	// Register user routes
-	userDomain := user.UserDomain{
-		DB:    registry.DB,
-		Redis: registry.Redis,
-	}
-	user.RegisterRoutes(v1, &userDomain)
+	ideaDomain, err := idea.BuildIdeaDomain(registry)
+	mistake.Unwrap(err)
+	idea.RegisterRoutes(v1, ideaDomain)
 
-	ideaDomain := idea.IdeaDomain{}
-	idea.RegisterRoutes(v1, &ideaDomain)
-
-	explorationDomain := exploration.NewExplorationDomain(registry.DB, registry.LLM)
+	explorationDomain, err := exploration.BuildExplorationDomain(registry)
+	mistake.Unwrap(err)
 	exploration.RegisterRoutes(v1, explorationDomain)
 
 	err = r.Run(":8888")

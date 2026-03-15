@@ -13,6 +13,7 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 	var skip bool
 	var newNodes []Node
 	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) > 0 {
 			skip = true
@@ -37,7 +38,6 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 		}
 		// Execute the first step synchronously so callers immediately see tasks.
 		d.executeNextTodoStepLocked(session.ID, now, state)
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
@@ -48,10 +48,17 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 		run.Status = RunStatusCompleted
 		run.EndedAt = now.UnixMilli()
 		state.Runs[0] = run
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 	if skip {
 		return
 	}
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -164,6 +171,7 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 	var skip bool
 	var newNodes []Node
 	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) == 0 {
 			skip = true
@@ -201,7 +209,6 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 			state.PlanSteps = append(state.PlanSteps, steps...)
 		}
 
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
@@ -215,10 +222,17 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 			Kind:        "balance_updated",
 			CreatedAt:   now.UnixMilli(),
 		})
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 	if skip {
 		return
 	}
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -229,6 +243,15 @@ func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, sour
 	var newNodes []Node
 	var newEdges []Edge
 
+	var skip bool
+	d.withWorkspaceState(session.ID, func(s *RuntimeWorkspaceState) {
+		skip = s.AgentRunning
+	})
+	if skip {
+		return
+	}
+
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) == 0 {
 			d.startRuntimeRunLocked(ctx, session, source, now, state)
@@ -242,8 +265,14 @@ func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, sour
 			}
 			state.Balance.UpdatedAt = now.UnixMilli()
 		}
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -356,6 +385,164 @@ func (d *ExplorationDomain) executeNextTodoStepLocked(workspaceID string, now ti
 	return true
 }
 
+// snapshotForCycle reads a consistent copy of session and runtime state for use by GenerateNodesForCycle.
+// Acquires store.mu then runtime.mu separately — never both simultaneously.
+// hasTodo is true if the current plan has at least one PlanStepTodo step.
+func (d *ExplorationDomain) snapshotForCycle(workspaceID string) (session ExplorationSession, state RuntimeWorkspaceState, hasTodo bool) {
+	// Step 1: copy session under store.mu
+	d.store.mu.RLock()
+	if ws, ok := d.store.workspaces[workspaceID]; ok {
+		session = *ws
+	}
+	d.store.mu.RUnlock()
+
+	// Step 2: copy runtime state under runtime.mu
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		state.Plans = append([]ExecutionPlan{}, s.Plans...)
+		state.PlanSteps = append([]PlanStep{}, s.PlanSteps...)
+		state.Balance = s.Balance
+		state.AgentTasks = append([]AgentTask{}, s.AgentTasks...)
+		state.Results = append([]AgentTaskResultSummary{}, s.Results...)
+		state.ReplanReason = s.ReplanReason
+		if len(s.Plans) > 0 {
+			currentPlanID := s.Plans[len(s.Plans)-1].ID
+			for _, step := range s.PlanSteps {
+				if step.PlanID == currentPlanID && step.Status == PlanStepTodo {
+					hasTodo = true
+					break
+				}
+			}
+		}
+	})
+	return
+}
+
+// markStepDoneAndCheck marks the first Todo step in the current plan as Done,
+// appends an AgentTask result, and returns true if no Todo steps remain.
+func (d *ExplorationDomain) markStepDoneAndCheck(workspaceID string) (allDone bool) {
+	now := time.Now()
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		if len(s.Plans) == 0 {
+			allDone = true
+			return
+		}
+		currentPlan := s.Plans[len(s.Plans)-1]
+		targetIdx := -1
+		for i, step := range s.PlanSteps {
+			if step.PlanID == currentPlan.ID && step.Status == PlanStepTodo {
+				targetIdx = i
+				break
+			}
+		}
+		if targetIdx == -1 {
+			allDone = true
+			return
+		}
+		step := &s.PlanSteps[targetIdx]
+		taskID := fmt.Sprintf("task-%s-%d", currentPlan.ID, step.Index)
+		s.AgentTasks = append(s.AgentTasks, AgentTask{
+			ID:          taskID,
+			WorkspaceID: workspaceID,
+			RunID:       currentPlan.RunID,
+			PlanID:      currentPlan.ID,
+			PlanStepID:  step.ID,
+			SubAgent:    subAgentForStep(step.Index),
+			Goal:        step.Desc,
+			Status:      PlanStepDone,
+			UpdatedAt:   now.UnixMilli(),
+		})
+		s.Results = append(s.Results, AgentTaskResultSummary{
+			TaskID:    taskID,
+			Summary:   subAgentForStep(step.Index) + " completed",
+			IsSuccess: true,
+			UpdatedAt: now.UnixMilli(),
+		})
+		step.Status = PlanStepDone
+		step.UpdatedAt = now.UnixMilli()
+		// Check if any Todo steps remain
+		for _, st := range s.PlanSteps {
+			if st.PlanID == currentPlan.ID && st.Status == PlanStepTodo {
+				return // more work to do
+			}
+		}
+		allDone = true
+	})
+	return
+}
+
+// runAgentCycle drives the agent execution loop for a workspace in a background goroutine.
+// It reads state snapshots, calls LLMPlanner.GenerateNodesForCycle outside locks,
+// applies nodes, and broadcasts via WebSocket. Sets AgentRunning=false on completion or panic.
+func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
+	// Read current run ID before defer (needed in panic handler)
+	var currentRunID string
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		if len(s.Runs) > 0 {
+			currentRunID = s.Runs[len(s.Runs)-1].ID
+		}
+	})
+
+	defer func() {
+		if r := recover(); r != nil {
+			d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+				s.AgentRunning = false
+				if len(s.Runs) > 0 && s.Runs[len(s.Runs)-1].Status != RunStatusCompleted {
+					s.Runs[len(s.Runs)-1].Status = RunStatusFailed
+					s.Runs[len(s.Runs)-1].EndedAt = time.Now().UnixMilli()
+				}
+			})
+			d.broadcastMutations(workspaceID, []MutationEvent{{
+				ID:          mutationID(workspaceID),
+				WorkspaceID: workspaceID,
+				Kind:        "run_failed",
+				Run:         &GenerationRun{ID: currentRunID},
+				CreatedAt:   time.Now().UnixMilli(),
+			}})
+		}
+	}()
+
+	totalCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	for {
+		sessionCopy, stateCopy, hasTodo := d.snapshotForCycle(workspaceID)
+		if !hasTodo {
+			break
+		}
+
+		stepCtx, stepCancel := context.WithTimeout(totalCtx, 2*time.Minute)
+		nodes, edges := d.planner.GenerateNodesForCycle(stepCtx, &sessionCopy, &stateCopy)
+		stepCancel()
+
+		d.applyGeneratedNodes(workspaceID, nodes, edges)
+		allDone := d.markStepDoneAndCheck(workspaceID)
+		d.persistRuntimeState(workspaceID)
+		if allDone {
+			break
+		}
+	}
+
+	// Mark complete and broadcast
+	var completedRunID string
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		s.AgentRunning = false
+		if len(s.Runs) > 0 {
+			completedRunID = s.Runs[len(s.Runs)-1].ID
+			if s.Runs[len(s.Runs)-1].Status == RunStatusRunning {
+				s.Runs[len(s.Runs)-1].Status = RunStatusCompleted
+				s.Runs[len(s.Runs)-1].EndedAt = time.Now().UnixMilli()
+			}
+		}
+	})
+	d.broadcastMutations(workspaceID, []MutationEvent{{
+		ID:          mutationID(workspaceID),
+		WorkspaceID: workspaceID,
+		Kind:        "run_completed",
+		Run:         &GenerationRun{ID: completedRunID},
+		CreatedAt:   time.Now().UnixMilli(),
+	}})
+}
+
 func subAgentForStep(index int) string {
 	switch index {
 	case 1:
@@ -457,16 +644,21 @@ func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, worksp
 	sessionCopy := *session
 	d.store.mu.Unlock()
 
-	var newNodes []Node
-	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
 		if state.Balance.WorkspaceID == "" {
 			now := time.Now()
 			runID := fmt.Sprintf("init-%s-%d", workspaceID, now.UnixNano())
 			state.Balance = buildInitialBalance(sessionCopy, runID, now)
 		}
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &sessionCopy, state)
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 
+	newNodes, newEdges := d.planner.GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
 	d.applyGeneratedNodes(workspaceID, newNodes, newEdges)
 }
