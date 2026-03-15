@@ -13,6 +13,7 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 	var skip bool
 	var newNodes []Node
 	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) > 0 {
 			skip = true
@@ -37,7 +38,6 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 		}
 		// Execute the first step synchronously so callers immediately see tasks.
 		d.executeNextTodoStepLocked(session.ID, now, state)
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
@@ -48,10 +48,17 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 		run.Status = RunStatusCompleted
 		run.EndedAt = now.UnixMilli()
 		state.Runs[0] = run
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 	if skip {
 		return
 	}
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -164,6 +171,7 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 	var skip bool
 	var newNodes []Node
 	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) == 0 {
 			skip = true
@@ -201,7 +209,6 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 			state.PlanSteps = append(state.PlanSteps, steps...)
 		}
 
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
@@ -215,10 +222,17 @@ func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, inter
 			Kind:        "balance_updated",
 			CreatedAt:   now.UnixMilli(),
 		})
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 	if skip {
 		return
 	}
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -229,6 +243,15 @@ func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, sour
 	var newNodes []Node
 	var newEdges []Edge
 
+	var skip bool
+	d.withWorkspaceState(session.ID, func(s *RuntimeWorkspaceState) {
+		skip = s.AgentRunning
+	})
+	if skip {
+		return
+	}
+
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) == 0 {
 			d.startRuntimeRunLocked(ctx, session, source, now, state)
@@ -242,8 +265,14 @@ func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, sour
 			}
 			state.Balance.UpdatedAt = now.UnixMilli()
 		}
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, state)
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
+	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
 	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
 	d.persistRuntimeState(session.ID)
 }
@@ -457,16 +486,21 @@ func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, worksp
 	sessionCopy := *session
 	d.store.mu.Unlock()
 
-	var newNodes []Node
-	var newEdges []Edge
+	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
 		if state.Balance.WorkspaceID == "" {
 			now := time.Now()
 			runID := fmt.Sprintf("init-%s-%d", workspaceID, now.UnixNano())
 			state.Balance = buildInitialBalance(sessionCopy, runID, now)
 		}
-		newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &sessionCopy, state)
+		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
+		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
+		stateCopy.Balance = state.Balance
+		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
+		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
+		stateCopy.ReplanReason = state.ReplanReason
 	})
 
+	newNodes, newEdges := d.planner.GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
 	d.applyGeneratedNodes(workspaceID, newNodes, newEdges)
 }
