@@ -1220,3 +1220,44 @@ func TestMutationEventsWrittenOnRunComplete(t *testing.T) {
 		t.Error("expected at least one 'node_added' mutation event")
 	}
 }
+
+func TestRuntimeCycleAddsEvidenceNodes(t *testing.T) {
+	_, domain := newTestRouterWithDomain()
+
+	// Create workspace and seed initial Direction nodes
+	snapshot := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "machine learning safety", OutputGoal: "risk report"})
+	wsID := snapshot.Exploration.ID
+	domain.initializeWorkspaceGraph(context.Background(), wsID)
+
+	// Verify Direction nodes exist
+	ws1, ok := domain.GetWorkspace(wsID)
+	if !ok {
+		t.Fatal("workspace not found after creation")
+	}
+	dirCount := 0
+	for _, n := range ws1.Exploration.Nodes {
+		if n.Type == NodeDirection {
+			dirCount++
+		}
+	}
+	if dirCount == 0 {
+		t.Fatal("expected Direction nodes after initializeWorkspaceGraph, got none")
+	}
+
+	// Run one cycle — should generate Evidence nodes (Research >= 0.5 by default)
+	domain.executeRuntimeCycle(ws1.Exploration, "test")
+
+	ws2, ok := domain.GetWorkspace(wsID)
+	if !ok {
+		t.Fatal("workspace not found after executeRuntimeCycle")
+	}
+	evCount := 0
+	for _, n := range ws2.Exploration.Nodes {
+		if n.Type == NodeEvidence {
+			evCount++
+		}
+	}
+	if evCount == 0 {
+		t.Errorf("expected Evidence nodes after executeRuntimeCycle, got none (total nodes: %d)", len(ws2.Exploration.Nodes))
+	}
+}
