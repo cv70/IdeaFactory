@@ -277,6 +277,12 @@ components:
     InterventionStatus:
       type: string
       enum: [received, absorbed, replanned, reflected, rejected]
+    GraphNodeType:
+      type: string
+      enum: [direction, evidence, claim, decision, unknown, artifact]
+    DirectionMaturity:
+      type: string
+      enum: [emerging, developing, mature, saturated, folded]
     ErrorResponse:
       type: object
       required: [error]
@@ -434,19 +440,52 @@ components:
                   type: array
                   items:
                     type: object
+                    required: [id, title, type, heat, folded]
                     properties:
                       id: { type: string }
                       title: { type: string }
-                      heat: { type: number }
+                      summary: { type: string }
+                      type:
+                        $ref: '#/components/schemas/GraphNodeType'
+                      heat: { type: number, description: 'Recent activity level' }
+                      confidence:
+                        type: number
+                        nullable: true
+                        description: 'System-assessed confidence (directions only)'
+                      maturity:
+                        allOf:
+                          - $ref: '#/components/schemas/DirectionMaturity'
+                        nullable: true
+                        description: 'Lifecycle state (directions only)'
                       folded: { type: boolean }
+                      evidence_balance:
+                        type: object
+                        nullable: true
+                        description: 'Evidence counts (directions only)'
+                        properties:
+                          supporting: { type: integer }
+                          contradicting: { type: integer }
+                      unresolved_count:
+                        type: integer
+                        nullable: true
+                        description: 'Open unknowns connected to this node'
+                      latest_change:
+                        type: string
+                        nullable: true
+                        description: 'Most recent change summary'
                 edges:
                   type: array
                   items:
                     type: object
+                    required: [from, to, kind]
                     properties:
                       from: { type: string }
                       to: { type: string }
                       kind: { type: string }
+                      strength:
+                        type: number
+                        nullable: true
+                        description: 'Computed from evidence density'
             recent_changes:
               type: array
               items:

@@ -72,7 +72,7 @@ flowchart LR
 | 数据面 | 保存内容 | 写入者 | 一致性要求 |
 | --- | --- | --- | --- |
 | Metadata | workspace/run/plan/task/intervention | API + Runtime | 状态转移必须单调可追溯 |
-| Graph | direction/edge/evidence/decision | Integration Pipeline | 只接受结构化 mutation 批次 |
+| Graph | direction / evidence / claim / decision / unknown / artifact 节点；supports / contradicts / branches_from / competes_with / raises / resolves / justifies / produces 边 | Integration Pipeline | 只接受结构化 mutation 批次（见技术设计 §4.3） |
 | Trace/Event | 调度事件、失败原因、投影事件 | Runtime + Projection | 事件幂等、可补拉 |
 | Artifact/Content | 原始资料、产物内容 | SubAgents | 保留来源映射与版本 |
 
@@ -81,6 +81,8 @@ flowchart LR
 - `Graph` 与 `Metadata` 通过 run 事务边界关联，避免“孤儿投影”
 - `Projection` 可由 `Graph + Metadata + Trace` 重建
 - 事件流采用至少一次投递，客户端基于事件 ID 去重
+
+Graph 写入约束：所有对 Graph Store 的写入必须通过 `MutationBatch` 提交，不允许绕过 Integration Pipeline 直接修改图数据。节点仅支持软删除（`FoldNode`），不进行硬删除。Mutation 契约详见技术设计文档 §4.3。
 
 ## 5. 关键时序（系统层）
 
