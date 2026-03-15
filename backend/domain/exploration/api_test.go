@@ -991,7 +991,7 @@ func TestV1ToggleFavoriteInterventionAffectsWorkspaceState(t *testing.T) {
 	}
 	ideaID := ""
 	for _, node := range snapshot.Exploration.Nodes {
-		if node.Type == NodeIdea {
+		if node.Type == NodeDirection {
 			ideaID = node.ID
 			break
 		}
@@ -1182,5 +1182,41 @@ func TestInterventionAdjustsBalanceState(t *testing.T) {
 	// "focus" and "收敛" both trigger Divergence -= 0.2, accumulated = -0.4 → clamped
 	if balance.Divergence >= 0.6 {
 		t.Errorf("expected Divergence to decrease after '收敛' intent, got %f", balance.Divergence)
+	}
+}
+
+func TestMutationEventsWrittenOnRunComplete(t *testing.T) {
+	router, domain := newTestRouterWithDomain()
+	_ = router
+
+	// Create workspace (initializeWorkspaceGraph is called inside CreateWorkspace handler)
+	wsID := ""
+	{
+		req := CreateWorkspaceReq{Topic: "autonomous vehicles safety", OutputGoal: "risk summary"}
+		snapshot := domain.CreateWorkspace(req)
+		wsID = snapshot.Exploration.ID
+		// Also call initializeWorkspaceGraph (normally called from handler)
+		domain.initializeWorkspaceGraph(context.Background(), wsID)
+	}
+
+	var mutations []MutationEvent
+	domain.withWorkspaceState(wsID, func(state *RuntimeWorkspaceState) {
+		mutations = append(mutations, state.Mutations...)
+	})
+
+	if len(mutations) == 0 {
+		t.Fatal("expected at least one mutation event after initializeWorkspaceGraph, got none")
+	}
+
+	// Check that at least one node_added event exists
+	hasNodeAdded := false
+	for _, m := range mutations {
+		if m.Kind == "node_added" {
+			hasNodeAdded = true
+			break
+		}
+	}
+	if !hasNodeAdded {
+		t.Error("expected at least one 'node_added' mutation event")
 	}
 }
