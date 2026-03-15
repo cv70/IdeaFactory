@@ -19,6 +19,11 @@ func (d *ExplorationDomain) ApiV1CreateWorkspace(c *gin.Context) {
 		return
 	}
 	snapshot := d.CreateWorkspace(req)
+	d.initializeWorkspaceGraph(c.Request.Context(), snapshot.Exploration.ID)
+	// Re-fetch so the response includes seeded Direction nodes.
+	if updated, ok := d.GetWorkspace(snapshot.Exploration.ID); ok {
+		snapshot = updated
+	}
 	c.JSON(http.StatusCreated, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration)})
 }
 
@@ -549,72 +554,59 @@ func (d *ExplorationDomain) storeInterventionRecord(workspaceID string, req Crea
 		CreatedAt:   toRFC3339(now),
 		UpdatedAt:   toRFC3339(now),
 	}
-
-	d.runtime.mu.Lock()
-	if d.runtime.intervention[workspaceID] == nil {
-		d.runtime.intervention[workspaceID] = map[string]InterventionView{}
-	}
-	d.runtime.intervention[workspaceID][view.ID] = view
-	d.runtime.mu.Unlock()
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		state.Interventions[view.ID] = view
+	})
 	return view
 }
 
 func (d *ExplorationDomain) getInterventionRecord(workspaceID string, interventionID string) (InterventionView, bool) {
-	d.runtime.mu.Lock()
-	items := d.runtime.intervention[workspaceID]
-	if items != nil {
-		if view, ok := items[interventionID]; ok {
-			d.runtime.mu.Unlock()
-			return view, true
-		}
+	var found InterventionView
+	var ok bool
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		found, ok = state.Interventions[interventionID]
+	})
+	if ok {
+		return found, true
 	}
-	d.runtime.mu.Unlock()
-
-	view, ok := d.loadV1Intervention(workspaceID, interventionID)
-	if !ok {
+	view, dbOk := d.loadV1Intervention(workspaceID, interventionID)
+	if !dbOk {
 		return InterventionView{}, false
 	}
-	d.runtime.mu.Lock()
-	if d.runtime.intervention[workspaceID] == nil {
-		d.runtime.intervention[workspaceID] = map[string]InterventionView{}
-	}
-	d.runtime.intervention[workspaceID][interventionID] = view
-	d.runtime.mu.Unlock()
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		state.Interventions[interventionID] = view
+	})
 	return view, true
 }
 
 func (d *ExplorationDomain) advanceInterventionByRuntimeEvent(workspaceID string, interventionID string, state RuntimeStateSnapshot, mutations []MutationEvent) InterventionView {
 	now := time.Now().UnixMilli()
-	d.runtime.mu.Lock()
-	defer d.runtime.mu.Unlock()
-	items := d.runtime.intervention[workspaceID]
-	if items == nil {
-		return InterventionView{}
-	}
-	view, ok := items[interventionID]
-	if !ok {
-		return InterventionView{}
-	}
-
-	if len(state.Runs) > 0 && view.Status == InterventionReceived {
-		view.Status = InterventionAbsorbed
-		view.AbsorbedByRunID = state.Runs[len(state.Runs)-1].ID
-		view.UpdatedAt = toRFC3339(now)
-	}
-	if len(state.Plans) > 0 && (view.Status == InterventionReceived || view.Status == InterventionAbsorbed) {
-		view.Status = InterventionReplanned
-		view.ReplannedPlanID = state.Plans[len(state.Plans)-1].ID
-		view.UpdatedAt = toRFC3339(now)
-	}
-	if len(mutations) > 0 {
-		view.Status = InterventionReflected
-		view.ReflectedEventID = fmt.Sprintf("event-%d", mutations[len(mutations)-1].CreatedAt)
-		view.UpdatedAt = toRFC3339(now)
-	}
-
-	d.runtime.intervention[workspaceID][interventionID] = view
-	d.persistV1Intervention(view)
-	return view
+	var result InterventionView
+	d.withWorkspaceState(workspaceID, func(ws *RuntimeWorkspaceState) {
+		view, ok := ws.Interventions[interventionID]
+		if !ok {
+			return
+		}
+		if len(state.Runs) > 0 && view.Status == InterventionReceived {
+			view.Status = InterventionAbsorbed
+			view.AbsorbedByRunID = state.Runs[len(state.Runs)-1].ID
+			view.UpdatedAt = toRFC3339(now)
+		}
+		if len(state.Plans) > 0 && (view.Status == InterventionReceived || view.Status == InterventionAbsorbed) {
+			view.Status = InterventionReplanned
+			view.ReplannedPlanID = state.Plans[len(state.Plans)-1].ID
+			view.UpdatedAt = toRFC3339(now)
+		}
+		if len(mutations) > 0 {
+			view.Status = InterventionReflected
+			view.ReflectedEventID = fmt.Sprintf("event-%d", mutations[len(mutations)-1].CreatedAt)
+			view.UpdatedAt = toRFC3339(now)
+		}
+		ws.Interventions[interventionID] = view
+		result = view
+	})
+	d.persistV1Intervention(result)
+	return result
 }
 
 func (d *ExplorationDomain) listInterventionEvents(

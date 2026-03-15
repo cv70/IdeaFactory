@@ -11,14 +11,20 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type ExplorationDomain struct {
-	DB        *dbdao.DB
-	DeepAgent adk.ResumableAgent
-	General   adk.Agent
-	Model     model.ToolCallingChatModel
-	store     *workspaceStore
-	ws        *wsState
-	runtime   *runtimeState
+// RuntimeWorkspaceState holds all per-workspace runtime data.
+// Access exclusively via withWorkspaceState.
+type RuntimeWorkspaceState struct {
+	Runs          []Run
+	Plans         []ExecutionPlan
+	PlanSteps     []PlanStep
+	AgentTasks    []AgentTask
+	Results       []AgentTaskResultSummary
+	Balance       BalanceState
+	Mutations     []MutationEvent
+	ReplanReason  string
+	Interventions map[string]InterventionView // keyed by intervention ID
+	Running       bool
+	Cursor        int
 }
 
 type workspaceStore struct {
@@ -36,43 +42,57 @@ type wsState struct {
 	subscribers map[string]map[*wsClient]struct{}
 }
 
-type runtimeState struct {
-	mu           sync.Mutex
-	running      map[string]bool
-	cursor       map[string]int
-	runs         map[string][]Run
-	plans        map[string][]ExecutionPlan
-	planSteps    map[string][]PlanStep
-	agentTasks   map[string][]AgentTask
-	results      map[string][]AgentTaskResultSummary
-	balance      map[string]BalanceState
-	mutations    map[string][]MutationEvent
-	replanReason map[string]string
-	intervention map[string]map[string]InterventionView
+type runtimeWorkspaces struct {
+	mu         sync.Mutex
+	workspaces map[string]*RuntimeWorkspaceState // keyed by workspace ID
+}
+
+type ExplorationDomain struct {
+	DB        *dbdao.DB
+	DeepAgent adk.ResumableAgent
+	General   adk.Agent
+	Model     model.ToolCallingChatModel
+	store     *workspaceStore
+	ws        *wsState
+	planner   Planner
+	runtime   *runtimeWorkspaces
+}
+
+// getWorkspaceState returns the state for workspaceID, initializing it if absent.
+// Callers MUST hold runtime.mu before calling.
+func (d *ExplorationDomain) getWorkspaceState(workspaceID string) *RuntimeWorkspaceState {
+	state, ok := d.runtime.workspaces[workspaceID]
+	if !ok {
+		state = &RuntimeWorkspaceState{
+			Interventions: map[string]InterventionView{},
+		}
+		d.runtime.workspaces[workspaceID] = state
+	}
+	return state
+}
+
+// withWorkspaceState locks runtime.mu, fetches or initializes the state, calls fn, then unlocks.
+// fn MUST NOT call withWorkspaceState (no re-entry).
+func (d *ExplorationDomain) withWorkspaceState(workspaceID string, fn func(*RuntimeWorkspaceState)) {
+	d.runtime.mu.Lock()
+	state := d.getWorkspaceState(workspaceID)
+	fn(state)
+	d.runtime.mu.Unlock()
 }
 
 func NewExplorationDomain(db *dbdao.DB, lm model.ToolCallingChatModel) *ExplorationDomain {
 	domain := &ExplorationDomain{
-		DB:    db,
-		Model: lm,
+		DB:      db,
+		Model:   lm,
+		planner: NewDeterministicPlanner(),
 		store: &workspaceStore{
 			workspaces: map[string]*ExplorationSession{},
 		},
 		ws: &wsState{
 			subscribers: map[string]map[*wsClient]struct{}{},
 		},
-		runtime: &runtimeState{
-			running:      map[string]bool{},
-			cursor:       map[string]int{},
-			runs:         map[string][]Run{},
-			plans:        map[string][]ExecutionPlan{},
-			planSteps:    map[string][]PlanStep{},
-			agentTasks:   map[string][]AgentTask{},
-			results:      map[string][]AgentTaskResultSummary{},
-			balance:      map[string]BalanceState{},
-			mutations:    map[string][]MutationEvent{},
-			replanReason: map[string]string{},
-			intervention: map[string]map[string]InterventionView{},
+		runtime: &runtimeWorkspaces{
+			workspaces: map[string]*RuntimeWorkspaceState{},
 		},
 	}
 	if lm != nil {

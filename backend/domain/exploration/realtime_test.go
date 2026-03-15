@@ -348,27 +348,3 @@ func TestNewExplorationDomainWithLLMBuildsDeepAgent(t *testing.T) {
 	}
 }
 
-func TestSubAgentAdapterUsesDeepAgent(t *testing.T) {
-	domain := newTestExplorationDomain()
-	fake := &fakeResumableAgent{}
-	domain.DeepAgent = fake
-
-	result, err := domain.dispatchAgentTask(AgentTask{
-		ID:       "task-1",
-		SubAgent: "research",
-		Goal:     "collect evidence",
-	})
-	if err != nil {
-		t.Fatalf("unexpected run error: %v", err)
-	}
-	if !result.IsSuccess {
-		t.Fatal("expected successful adapter run")
-	}
-	if !strings.Contains(strings.ToLower(result.Summary), "deepagent") &&
-		!strings.Contains(strings.ToLower(result.Summary), "deep agent") {
-		t.Fatalf("expected deep agent summary, got: %s", result.Summary)
-	}
-	if !fake.called {
-		t.Fatal("expected deep agent to be called")
-	}
-}

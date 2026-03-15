@@ -121,20 +121,24 @@ func (d *ExplorationDomain) broadcastMutations(workspaceID string, mutations []M
 }
 
 func (d *ExplorationDomain) startRuntime(workspaceID string) {
-	d.runtime.mu.Lock()
-	if d.runtime.running[workspaceID] {
-		d.runtime.mu.Unlock()
+	var alreadyRunning bool
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		if state.Running {
+			alreadyRunning = true
+			return
+		}
+		state.Running = true
+	})
+	if alreadyRunning {
 		return
 	}
-	d.runtime.running[workspaceID] = true
-	d.runtime.mu.Unlock()
 
 	go func() {
 		defer func() {
-			d.runtime.mu.Lock()
-			delete(d.runtime.running, workspaceID)
-			delete(d.runtime.cursor, workspaceID)
-			d.runtime.mu.Unlock()
+			d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+				state.Running = false
+				state.Cursor = 0
+			})
 		}()
 
 		for {
@@ -152,9 +156,10 @@ func (d *ExplorationDomain) startRuntime(workspaceID string) {
 				return
 			}
 
-			d.runtime.mu.Lock()
-			targetOpportunityID := chooseRuntimeTarget(current, d.runtime)
-			d.runtime.mu.Unlock()
+			var targetOpportunityID string
+			d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+				targetOpportunityID = chooseRuntimeTarget(current, state)
+			})
 
 			next := d.applyExpandOpportunity(current, targetOpportunityID)
 			d.executeRuntimeCycle(next, "runtime_tick")

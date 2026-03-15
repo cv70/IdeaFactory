@@ -678,9 +678,9 @@ func TestV1InterventionCanRecoverFromDB(t *testing.T) {
 		t.Fatal("expected intervention id")
 	}
 
-	domain.runtime.mu.Lock()
-	delete(domain.runtime.intervention, created.Workspace.ID)
-	domain.runtime.mu.Unlock()
+	domain.withWorkspaceState(created.Workspace.ID, func(state *RuntimeWorkspaceState) {
+		state.Interventions = map[string]InterventionView{}
+	})
 
 	getReq, _ := http.NewRequest(
 		http.MethodGet,

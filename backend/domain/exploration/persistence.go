@@ -251,12 +251,12 @@ func (d *ExplorationDomain) persistMutations(mutations []MutationEvent) {
 	}
 	if d.DB == nil {
 		workspaceID := mutations[0].WorkspaceID
-		d.runtime.mu.Lock()
-		d.runtime.mutations[workspaceID] = append(d.runtime.mutations[workspaceID], mutations...)
-		if len(d.runtime.mutations[workspaceID]) > 3000 {
-			d.runtime.mutations[workspaceID] = append([]MutationEvent{}, d.runtime.mutations[workspaceID][len(d.runtime.mutations[workspaceID])-2000:]...)
-		}
-		d.runtime.mu.Unlock()
+		d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+			state.Mutations = append(state.Mutations, mutations...)
+			if len(state.Mutations) > 3000 {
+				state.Mutations = append([]MutationEvent{}, state.Mutations[len(state.Mutations)-2000:]...)
+			}
+		})
 		return
 	}
 
@@ -315,9 +315,10 @@ func (d *ExplorationDomain) replayMutations(workspaceID string, cursor string, l
 			fetchLimit = 200
 		}
 
-		d.runtime.mu.Lock()
-		logs := append([]MutationEvent{}, d.runtime.mutations[workspaceID]...)
-		d.runtime.mu.Unlock()
+		var logs []MutationEvent
+		d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+			logs = append([]MutationEvent{}, state.Mutations...)
+		})
 
 		filtered := make([]MutationEvent, 0, len(logs))
 		for _, event := range logs {

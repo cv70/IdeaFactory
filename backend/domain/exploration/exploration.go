@@ -428,7 +428,7 @@ func (d *ExplorationDomain) applyToggleFavorite(session ExplorationSession, idea
 	return session
 }
 
-func chooseRuntimeTarget(session ExplorationSession, runtime *runtimeState) string {
+func chooseRuntimeTarget(session ExplorationSession, state *RuntimeWorkspaceState) string {
 	opportunities := filterNodesByType(session.Nodes, NodeOpportunity)
 	if len(opportunities) == 0 {
 		return session.ActiveOpportunityID
@@ -442,8 +442,8 @@ func chooseRuntimeTarget(session ExplorationSession, runtime *runtimeState) stri
 		}
 	}
 	if strategy.ExpansionMode == "round_robin" {
-		idx := runtime.cursor[session.ID] % len(opportunities)
-		runtime.cursor[session.ID] = (idx + 1) % len(opportunities)
+		idx := state.Cursor % len(opportunities)
+		state.Cursor = (idx + 1) % len(opportunities)
 		return opportunities[idx].ID
 	}
 	return session.ActiveOpportunityID

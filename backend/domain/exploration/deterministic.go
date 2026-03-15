@@ -17,16 +17,34 @@ func NewDeterministicPlanner() *DeterministicPlanner {
 	return &DeterministicPlanner{}
 }
 
-func (p *DeterministicPlanner) BuildInitialPlan(_ context.Context, session *ExplorationSession, _ *RuntimeWorkspaceState) (*ExecutionPlan, []PlanStep, error) {
+func (p *DeterministicPlanner) BuildInitialPlan(_ context.Context, session *ExplorationSession, state *RuntimeWorkspaceState) (*ExecutionPlan, []PlanStep, error) {
 	now := time.Now()
 	planID := fmt.Sprintf("plan-%s-%d", session.ID, now.UnixNano())
-	plan := &ExecutionPlan{
-		ID: planID, WorkspaceID: session.ID, Version: 1, CreatedAt: now.UnixMilli(),
+	runID := ""
+	if state != nil && len(state.Runs) > 0 {
+		runID = state.Runs[len(state.Runs)-1].ID
 	}
-	steps := []PlanStep{{
-		ID: planID + "-step-1", WorkspaceID: session.ID, PlanID: planID,
-		Index: 1, Desc: "generate nodes", Status: PlanStepTodo, UpdatedAt: now.UnixMilli(),
-	}}
+	plan := &ExecutionPlan{
+		ID: planID, WorkspaceID: session.ID, RunID: runID, Version: 1, CreatedAt: now.UnixMilli(),
+	}
+	stepDescs := []string{
+		"collect research signals for current opportunities",
+		"structure research into graph mutations and decisions",
+		"materialize high-confidence idea cards and summary",
+	}
+	steps := make([]PlanStep, 0, len(stepDescs))
+	for i, desc := range stepDescs {
+		steps = append(steps, PlanStep{
+			ID:          fmt.Sprintf("%s-step-%d", planID, i+1),
+			WorkspaceID: session.ID,
+			RunID:       runID,
+			PlanID:      planID,
+			Index:       i + 1,
+			Desc:        desc,
+			Status:      PlanStepTodo,
+			UpdatedAt:   now.UnixMilli(),
+		})
+	}
 	return plan, steps, nil
 }
 

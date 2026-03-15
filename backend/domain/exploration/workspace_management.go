@@ -58,10 +58,11 @@ func (d *ExplorationDomain) ArchiveWorkspace(workspaceID string) bool {
 	delete(d.store.workspaces, workspaceID)
 	d.store.mu.Unlock()
 
-	d.runtime.mu.Lock()
-	delete(d.runtime.running, workspaceID)
-	delete(d.runtime.cursor, workspaceID)
-	d.runtime.mu.Unlock()
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		state.Running = false
+		state.Cursor = 0
+		state.Interventions = map[string]InterventionView{}
+	})
 
 	return true
 }
