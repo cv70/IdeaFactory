@@ -284,11 +284,12 @@ function App() {
 
     setExploration(response.data.exploration)
     if (response.data.exploration.strategy) {
+      const strategy = response.data.exploration.strategy
       setStrategyHistory((current) => [
         {
           id: `local-${Date.now()}`,
           createdAt: Date.now(),
-          strategy: response.data.exploration.strategy,
+          strategy,
         },
         ...current,
       ].slice(0, 20))

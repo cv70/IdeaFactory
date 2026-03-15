@@ -35,10 +35,12 @@ export function SidebarPanel(props: SidebarPanelProps) {
   const [interventionText, setInterventionText] = useState('')
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setIntervalMs(String(props.strategy?.interval_ms ?? 4000))
     setMaxRuns(String(props.strategy?.max_runs ?? 30))
     setExpansionMode(props.strategy?.expansion_mode ?? 'active')
     setPreferredBranchId(props.strategy?.preferred_branch_id ?? '')
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [props.strategy?.interval_ms, props.strategy?.max_runs, props.strategy?.expansion_mode, props.strategy?.preferred_branch_id])
 
   function applyCurrentStrategy() {
