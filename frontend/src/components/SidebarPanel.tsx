@@ -20,6 +20,9 @@ type SidebarPanelProps = {
   }) => void
   onRollbackStrategy: (strategy: RuntimeStrategy) => void
   onToggleFavorite: (idea: Node) => void
+  onSubmitIntervention: (intent: string) => void
+  lastInterventionIntent?: string
+  lastInterventionStatus?: string
 }
 
 export function SidebarPanel(props: SidebarPanelProps) {
@@ -29,6 +32,7 @@ export function SidebarPanel(props: SidebarPanelProps) {
     props.strategy?.expansion_mode ?? 'active',
   )
   const [preferredBranchId, setPreferredBranchId] = useState(props.strategy?.preferred_branch_id ?? '')
+  const [interventionText, setInterventionText] = useState('')
 
   useEffect(() => {
     setIntervalMs(String(props.strategy?.interval_ms ?? 4000))
@@ -75,6 +79,34 @@ export function SidebarPanel(props: SidebarPanelProps) {
 
   return (
     <aside className="sidebarPanel">
+      <section className="sidebarSection">
+        <p className="sectionLabel">Intervention</p>
+        <h2>Submit intervention</h2>
+        <div className="strategyPanel">
+          <label htmlFor="intervention">Intervention</label>
+          <textarea
+            id="intervention"
+            value={interventionText}
+            onChange={(event) => setInterventionText(event.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              props.onSubmitIntervention(interventionText)
+              setInterventionText('')
+            }}
+          >
+            Submit intervention
+          </button>
+          {props.lastInterventionStatus ? (
+            <p>Status: {props.lastInterventionStatus}</p>
+          ) : null}
+          {props.lastInterventionIntent ? (
+            <p>{props.lastInterventionIntent}</p>
+          ) : null}
+        </div>
+      </section>
+
       <section className="sidebarSection">
         <p className="sectionLabel">Governance</p>
         <h2>Runtime strategy</h2>

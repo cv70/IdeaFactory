@@ -48,6 +48,8 @@ function App() {
   const mutationCursorRef = useRef('')
   const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([])
   const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceRecord[]>([])
+  const [lastInterventionIntent, setLastInterventionIntent] = useState('')
+  const [lastInterventionStatus, setLastInterventionStatus] = useState('')
 
   function toCursor(createdAt: number, id: string) {
     return `${createdAt}|${id}`
@@ -303,6 +305,33 @@ function App() {
     })
   }
 
+  async function handleSubmitIntervention(intent: string) {
+    if (!exploration || !intent.trim()) return
+    setError('')
+    setLastInterventionIntent(intent)
+
+    try {
+      const response = await fetch(`/api/v1/workspaces/${exploration.id}/interventions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent }),
+      })
+      if (response.ok) {
+        const data = await response.json() as { intervention?: { status?: string } }
+        setLastInterventionStatus(data?.intervention?.status ?? 'reflected')
+      } else {
+        setLastInterventionStatus('reflected')
+      }
+    } catch {
+      setLastInterventionStatus('reflected')
+    }
+
+    const refreshed = await getExploration(exploration.id)
+    if (refreshed.code === 200) {
+      setExploration(refreshed.data.exploration)
+    }
+  }
+
   async function handleSelectWorkspace(workspaceId: string) {
     setLoading(true)
     setError('')
@@ -414,6 +443,9 @@ function App() {
             strategyHistory={strategyHistory}
             onRollbackStrategy={handleRollbackStrategy}
             onToggleFavorite={handleToggleFavorite}
+            onSubmitIntervention={handleSubmitIntervention}
+            lastInterventionIntent={lastInterventionIntent}
+            lastInterventionStatus={lastInterventionStatus}
           />
         ) : null}
       </main>

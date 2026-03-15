@@ -16,7 +16,7 @@ export function WorkbenchColumns(props: WorkbenchColumnsProps) {
       <article className="columnPanel">
         <div className="sectionIntro">
           <p className="sectionLabel">Map</p>
-          <h2>Opportunity map</h2>
+          <h2>Direction map</h2>
           <p>{session.topic} reframed as expandable exploration branches.</p>
         </div>
 

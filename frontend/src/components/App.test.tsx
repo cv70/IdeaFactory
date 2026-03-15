@@ -24,7 +24,7 @@ describe('idea factory app', () => {
     fireEvent.change(screen.getByLabelText('Output goal'), { target: { value: 'Research directions' } })
     fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
 
-    expect(await screen.findByText('Opportunity map')).toBeInTheDocument()
+    expect(await screen.findByText('Direction map')).toBeInTheDocument()
     expect(screen.getByText('Question trail')).toBeInTheDocument()
     expect(screen.getByText('Materialized ideas')).toBeInTheDocument()
   })
@@ -86,18 +86,18 @@ describe('idea factory app', () => {
       target: { value: 'Research directions' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
-    expect(await screen.findByText(/Learning friction for AI education/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/Learning friction for AI education/)).length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Climate fintech' } })
     fireEvent.change(screen.getByLabelText('Output goal'), {
       target: { value: 'Venture opportunities' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
-    expect(await screen.findByText(/Learning friction for Climate fintech/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/Learning friction for Climate fintech/)).length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Open workspace AI education' }))
     await waitFor(() => {
-      expect(screen.getByText(/Learning friction for AI education/)).toBeInTheDocument()
+      expect(screen.getAllByText(/Learning friction for AI education/).length).toBeGreaterThan(0)
     })
   })
 
@@ -157,5 +157,21 @@ describe('idea factory app', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
 
     expect(await screen.findByText('Mock API failure')).toBeInTheDocument()
+  })
+
+  it('submits an intervention and shows reflected status', async () => {
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'AI wellness coach' } })
+    fireEvent.change(screen.getByLabelText('Output goal'), { target: { value: 'find promising directions' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Start exploration' }))
+
+    expect(await screen.findByText('Direction map')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Intervention'), { target: { value: 'focus on retention loops' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Submit intervention' }))
+
+    expect(await screen.findByText(/reflected/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/focus on retention loops/i).length).toBeGreaterThan(0)
   })
 })
