@@ -212,3 +212,227 @@ function GraphCanvas({
     </>
   )
 }
+
+// ─── GraphView (outer — owns D3 sim, ReactFlowProvider) ──────────────────────
+
+export type GraphViewProps = {
+  session: ExplorationSession
+  selectedNodeId: string | null
+  onSelectNode: (node: ExplorationNode | null) => void
+  onExpandOpportunity: (node: ExplorationNode) => void
+}
+
+export function GraphView({ session, selectedNodeId, onSelectNode, onExpandOpportunity }: GraphViewProps) {
+  const { t } = useTranslation()
+
+  // D3 simulation refs
+  const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null)
+  const simNodeMap = useRef<Map<string, SimNode>>(new Map())
+
+  // React Flow state
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode<RFNodeData, 'ideaNode'>>([])
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([])
+
+  // Derived selected node
+  const selectedNode = useMemo(
+    () => (selectedNodeId ? (session.nodes.find((n) => n.id === selectedNodeId) ?? null) : null),
+    [session.nodes, selectedNodeId],
+  )
+
+  // ─── Data preparation ────────────────────────────────────────────────────────
+  const { allNodes, allEdges } = useMemo(() => {
+    // 1. Anchor: find real topic node or create synthetic
+    const realTopic = session.nodes.find((n) => n.type === 'topic')
+    const anchorId = realTopic?.id ?? `__topic__${session.id}`
+    const syntheticTopic: ExplorationNode | null = realTopic
+      ? null
+      : {
+          id: anchorId,
+          sessionId: session.id,
+          type: 'topic',
+          title: session.topic,
+          summary: session.outputGoal,
+          status: 'active',
+          score: 1,
+          depth: 0,
+          metadata: {},
+          evidenceSummary: '',
+        }
+
+    // 2. Synthetic edges: connect unlinked direction/opportunity nodes to anchor
+    const incomingIds = new Set(session.edges.map((e) => e.to))
+    const syntheticEdges: ExplorationEdge[] = session.nodes
+      .filter((n) => (n.type === 'direction' || n.type === 'opportunity') && !incomingIds.has(n.id))
+      .map((n) => ({ id: `__e__${anchorId}__${n.id}`, from: anchorId, to: n.id, type: 'leads_to' as const }))
+
+    return {
+      allNodes: syntheticTopic ? [syntheticTopic, ...session.nodes] : session.nodes,
+      allEdges: [...session.edges, ...syntheticEdges],
+    }
+  }, [session.nodes, session.edges, session.id, session.topic, session.outputGoal])
+
+  // ─── D3 simulation init (once at mount) ──────────────────────────────────────
+  useEffect(() => {
+    function onTick() {
+      setRfNodes((prev) =>
+        prev.map((rfNode) => {
+          const simNode = simNodeMap.current.get(rfNode.id)
+          if (!simNode || simNode.x == null) return rfNode
+          return { ...rfNode, position: { x: simNode.x, y: simNode.y } }
+        }),
+      )
+    }
+
+    const sim = d3
+      .forceSimulation<SimNode>()
+      .force(
+        'link',
+        d3.forceLink<SimNode, SimLink>().id((d) => d.id).distance(130).strength(0.4),
+      )
+      .force('charge', d3.forceManyBody<SimNode>().strength((d) => -(nodeRadius(d.type as string) * 18)))
+      .force('center', d3.forceCenter(0, 0).strength(0.05))
+      .force('collide', d3.forceCollide<SimNode>((d) => nodeRadius(d.type as string) + 12).strength(0.8))
+      .alphaDecay(0.02)
+      .on('tick', onTick)
+
+    simRef.current = sim
+    return () => { sim.stop() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ─── Simulation sync (on session data change) ─────────────────────────────────
+  useEffect(() => {
+    const sim = simRef.current
+    if (!sim) return
+
+    const map = simNodeMap.current
+    let hasNew = false
+
+    // 1. Add new nodes, update existing
+    for (const node of allNodes) {
+      if (!map.has(node.id)) {
+        const parentEdge = allEdges.find((e) => e.to === node.id)
+        const parent = parentEdge ? map.get(parentEdge.from) : null
+        map.set(node.id, {
+          ...node,
+          x: parent?.x != null ? parent.x + (Math.random() - 0.5) * 30 : (Math.random() - 0.5) * 60,
+          y: parent?.y != null ? parent.y + (Math.random() - 0.5) * 30 : (Math.random() - 0.5) * 60,
+        } as SimNode)
+        hasNew = true
+      } else {
+        Object.assign(map.get(node.id)!, node)
+      }
+    }
+
+    // 2. Remove stale nodes
+    const nodeIds = new Set(allNodes.map((n) => n.id))
+    for (const id of map.keys()) {
+      if (!nodeIds.has(id)) map.delete(id)
+    }
+
+    // 3. Update RF nodes (entering nodes start hidden)
+    const enteringIds = new Set(
+      allNodes.filter((n) => !rfNodes.find((r) => r.id === n.id)).map((n) => n.id),
+    )
+    setRfNodes(allNodes.map((n) => buildRFNode(n, enteringIds.has(n.id))))
+    setRfEdges(
+      allEdges
+        .filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to))
+        .map(buildRFEdge),
+    )
+
+    // 4. Update D3 simulation
+    sim.nodes([...map.values()])
+    const linkForce = sim.force<d3.ForceLink<SimNode, SimLink>>('link')
+    linkForce?.links(
+      allEdges
+        .filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to))
+        .map((e) => ({ source: e.from, target: e.to })),
+    )
+
+    // 5. Restart simulation on new nodes
+    if (hasNew) sim.alpha(0.5).restart()
+
+    // 6. Pin topic node at origin
+    for (const simNode of map.values()) {
+      if (simNode.type === 'topic') {
+        simNode.fx = 0
+        simNode.fy = 0
+      }
+    }
+
+    // 7. Reveal entering nodes with animation
+    if (enteringIds.size > 0) {
+      const t1 = setTimeout(() => {
+        setRfNodes((prev) =>
+          prev.map((n) => (enteringIds.has(n.id) ? { ...n, hidden: false, className: 'nodeEnter' } : n)),
+        )
+      }, 16)
+      const t2 = setTimeout(() => {
+        setRfNodes((prev) =>
+          prev.map((n) => (enteringIds.has(n.id) ? { ...n, className: '' } : n)),
+        )
+      }, 520)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allNodes, allEdges])
+
+  // ─── Drag handlers (React Flow → D3 fx/fy) ───────────────────────────────────
+  function handleNodeDragStart(_event: React.MouseEvent, node: RFNode) {
+    const simNode = simNodeMap.current.get(node.id)
+    if (simNode) {
+      simNode.fx = node.position.x
+      simNode.fy = node.position.y
+    }
+    simRef.current?.alphaTarget(0.3).restart()
+  }
+
+  function handleNodeDrag(_event: React.MouseEvent, node: RFNode) {
+    const simNode = simNodeMap.current.get(node.id)
+    if (simNode) {
+      simNode.fx = node.position.x
+      simNode.fy = node.position.y
+    }
+  }
+
+  function handleNodeDragStop(_event: React.MouseEvent, node: RFNode) {
+    const simNode = simNodeMap.current.get(node.id)
+    if (simNode) {
+      simNode.fx = null
+      simNode.fy = null
+    }
+    simRef.current?.alphaTarget(0)
+  }
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+  if (allNodes.length === 0) {
+    return (
+      <div className="graphContainer graphEmpty">
+        <p>{t('graph.emptyHint')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="graphContainer">
+      <ReactFlowProvider>
+        <GraphCanvas
+          rfNodes={rfNodes}
+          rfEdges={rfEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          selectedNode={selectedNode}
+          onSelectNode={onSelectNode}
+          onExpandOpportunity={onExpandOpportunity}
+          onNodeDragStart={handleNodeDragStart}
+          onNodeDrag={handleNodeDrag}
+          onNodeDragStop={handleNodeDragStop}
+        />
+      </ReactFlowProvider>
+    </div>
+  )
+}
