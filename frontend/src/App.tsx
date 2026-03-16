@@ -5,7 +5,9 @@ import { AppHeader } from './components/AppHeader'
 import { LaunchPanel } from './components/LaunchPanel'
 import { SidebarPanel } from './components/SidebarPanel'
 import { WorkspaceManager } from './components/WorkspaceManager'
-import { WorkbenchColumns } from './components/WorkbenchColumns'
+import { GraphView } from './components/GraphView'
+import { LangContext, makeT } from './lib/i18n'
+import type { Lang } from './lib/i18n'
 import { DEFAULT_CONSTRAINTS, EXAMPLE_TOPICS } from './data/mockExploration'
 import {
   archiveWorkspace,
@@ -41,7 +43,7 @@ function App() {
   const [outputGoal, setOutputGoal] = useState('')
   const [constraints, setConstraints] = useState(DEFAULT_CONSTRAINTS)
   const [exploration, setExploration] = useState<ExplorationSession | null>(null)
-  const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [strategyUpdating, setStrategyUpdating] = useState(false)
   const [error, setError] = useState('')
@@ -50,6 +52,7 @@ function App() {
   const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceRecord[]>([])
   const [lastInterventionIntent, setLastInterventionIntent] = useState('')
   const [lastInterventionStatus, setLastInterventionStatus] = useState('')
+  const [lang, setLang] = useState<Lang>('zh')
 
   function toCursor(createdAt: number, id: string) {
     return `${createdAt}|${id}`
@@ -81,8 +84,8 @@ function App() {
 
   const view = useMemo(() => {
     if (!exploration) return null
-    return buildWorkbenchView(exploration, selectedOpportunityId ?? undefined)
-  }, [exploration, selectedOpportunityId])
+    return buildWorkbenchView(exploration, exploration.activeOpportunityId)
+  }, [exploration])
 
   const savedIdeas = useMemo(() => {
     if (!exploration) return []
@@ -143,7 +146,7 @@ function App() {
       onSnapshot: (payload) => {
         if (!active) return
         setExploration(payload.exploration)
-        setSelectedOpportunityId((current) => {
+        setSelectedNodeId((current) => {
           if (!current) return payload.exploration.activeOpportunityId
           const exists = payload.exploration.nodes.some((node) => node.id === current)
           return exists ? current : payload.exploration.activeOpportunityId
@@ -217,12 +220,8 @@ function App() {
     })
     setStrategyHistory([])
     mutationCursorRef.current = ''
-    setSelectedOpportunityId(response.data.exploration.activeOpportunityId)
+    setSelectedNodeId(response.data.exploration.activeOpportunityId)
     setLoading(false)
-  }
-
-  function handleSelectOpportunity(opportunity: Node) {
-    setSelectedOpportunityId(opportunity.id)
   }
 
   async function handleExpandOpportunity(opportunity: Node) {
@@ -240,7 +239,7 @@ function App() {
     }
 
     setExploration(response.data.exploration)
-    setSelectedOpportunityId(opportunity.id)
+    setSelectedNodeId(opportunity.id)
     setLoading(false)
   }
 
@@ -343,7 +342,7 @@ function App() {
     }
 
     setExploration(response.data.exploration)
-    setSelectedOpportunityId(response.data.exploration.activeOpportunityId)
+    setSelectedNodeId(response.data.exploration.activeOpportunityId)
     upsertWorkspaceHistory({
       id: response.data.exploration.id,
       topic: response.data.exploration.topic,
@@ -373,7 +372,7 @@ function App() {
 
     if (exploration?.id === workspaceId) {
       setExploration(null)
-      setSelectedOpportunityId(null)
+      setSelectedNodeId(null)
       setStrategyHistory([])
     }
     setLoading(false)
@@ -391,6 +390,7 @@ function App() {
   }
 
   return (
+    <LangContext.Provider value={{ lang, setLang, t: makeT(lang) }}>
     <div className="appShell">
       <AppHeader />
 
@@ -418,16 +418,12 @@ function App() {
 
           {error ? <p className="errorBanner">{error}</p> : null}
 
-          {exploration && view ? (
-            <WorkbenchColumns
-              session={{
-                ...exploration,
-                activeOpportunityId: selectedOpportunityId ?? exploration.activeOpportunityId,
-              }}
-              view={view}
-              onSelectOpportunity={handleSelectOpportunity}
+          {exploration ? (
+            <GraphView
+              session={exploration}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={(node) => setSelectedNodeId(node?.id ?? null)}
               onExpandOpportunity={handleExpandOpportunity}
-              onToggleFavorite={handleToggleFavorite}
             />
           ) : null}
         </div>
@@ -449,6 +445,7 @@ function App() {
         ) : null}
       </main>
     </div>
+    </LangContext.Provider>
   )
 }
 
