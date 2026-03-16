@@ -1,3 +1,5 @@
+import { useTranslation } from '../lib/i18n'
+
 type WorkspaceRecord = {
   id: string
   topic: string
@@ -13,17 +15,19 @@ type WorkspaceManagerProps = {
 }
 
 export function WorkspaceManager(props: WorkspaceManagerProps) {
+  const { t } = useTranslation()
+
   return (
     <section className="launchPanel">
       <div className="sectionIntro">
-        <p className="sectionLabel">Workspaces</p>
-        <h2>Switch and recover</h2>
-        <p>Continue from previous exploration workspaces without starting over.</p>
+        <p className="sectionLabel">{t('workspaces.label')}</p>
+        <h2>{t('workspaces.title')}</h2>
+        <p>{t('workspaces.description')}</p>
       </div>
 
       <div className="workspaceList">
         {props.workspaces.length === 0 ? (
-          <p className="emptyState">No historical workspaces yet.</p>
+          <p className="emptyState">{t('workspaces.empty')}</p>
         ) : (
           props.workspaces.map((workspace) => {
             const active = workspace.id === props.activeWorkspaceId
@@ -44,7 +48,7 @@ export function WorkspaceManager(props: WorkspaceManagerProps) {
                     onClick={() => props.onSelectWorkspace(workspace.id)}
                     disabled={props.loading}
                   >
-                    Open
+                    {t('workspaces.open')}
                   </button>
                   <button
                     type="button"
@@ -52,7 +56,7 @@ export function WorkspaceManager(props: WorkspaceManagerProps) {
                     onClick={() => props.onArchiveWorkspace(workspace.id)}
                     disabled={props.loading}
                   >
-                    Archive
+                    {t('workspaces.archive')}
                   </button>
                 </div>
               </article>

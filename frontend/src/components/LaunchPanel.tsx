@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import { useTranslation } from '../lib/i18n'
 
 type LaunchPanelProps = {
   topic: string
@@ -14,49 +15,48 @@ type LaunchPanelProps = {
 }
 
 export function LaunchPanel(props: LaunchPanelProps) {
+  const { t } = useTranslation()
+
   return (
     <section className="launchPanel">
       <div className="sectionIntro">
-        <p className="sectionLabel">Launch</p>
-        <h2>Start from a theme, not a template</h2>
-        <p>
-          Keep the input lightweight. The system will turn it into opportunities, questions,
-          hypotheses, and materialized ideas.
-        </p>
+        <p className="sectionLabel">{t('launch.label')}</p>
+        <h2>{t('launch.title')}</h2>
+        <p>{t('launch.description')}</p>
       </div>
 
       <form className="launchForm" onSubmit={props.onSubmit}>
         <label className="field">
-          <span>Topic</span>
+          <span>{t('launch.topic')}</span>
           <input
             value={props.topic}
             onChange={(event) => props.onTopicChange(event.target.value)}
-            placeholder="AI education, oncology screening, creator infrastructure"
+            placeholder={t('launch.topicPlaceholder')}
           />
         </label>
 
         <label className="field">
-          <span>Output goal</span>
+          <span>{t('launch.outputGoal')}</span>
           <input
             value={props.outputGoal}
             onChange={(event) => props.onOutputGoalChange(event.target.value)}
-            placeholder="Research directions, venture opportunities, product bets"
+            placeholder={t('launch.outputGoalPlaceholder')}
           />
         </label>
 
         <label className="field">
-          <span>Constraints</span>
+          <span>{t('launch.constraints')}</span>
           <textarea
             value={props.constraints}
             onChange={(event) => props.onConstraintsChange(event.target.value)}
             rows={3}
-            placeholder="Low-cost, explainable, easy to validate"
+            placeholder={t('launch.constraintsPlaceholder')}
           />
         </label>
 
         <div className="launchActions">
           <button type="submit" className="primaryAction" disabled={props.loading}>
-            {props.loading ? 'Starting...' : 'Start exploration'}
+            {props.loading ? t('launch.startingButton') : t('launch.startButton')}
           </button>
           <div className="exampleRow" aria-label="Example topics">
             {props.examples.map((example) => (

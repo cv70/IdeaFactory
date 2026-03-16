@@ -1,12 +1,23 @@
+import { useTranslation } from '../lib/i18n'
+
 export function AppHeader() {
+  const { t, lang, setLang } = useTranslation()
+
   return (
     <header className="hero">
-      <p className="eyebrow">Unified exploration graph</p>
-      <h1>Idea Factory</h1>
-      <p className="heroCopy">
-        Build a problem space first, then materialize idea paths you can inspect, expand, and
-        save.
-      </p>
+      <div className="heroContent">
+        <p className="eyebrow">{t('header.tagline')}</p>
+        <h1>{t('header.title')}</h1>
+        <p className="heroCopy">{t('header.description')}</p>
+      </div>
+      <button
+        type="button"
+        className="langToggle"
+        onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+        aria-label="Switch language"
+      >
+        {t('header.langSwitch')}
+      </button>
     </header>
   )
 }

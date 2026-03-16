@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nodeConfig, buildRFNode, buildRFEdge } from './GraphView'
+import { nodeConfig, nodeRadius, buildRFNode, buildRFEdge } from './GraphView'
 import type { Node as ExplorationNode, Edge as ExplorationEdge } from '../types/exploration'
 
 const makeNode = (overrides: Partial<ExplorationNode> = {}): ExplorationNode => ({
@@ -14,6 +14,14 @@ const makeNode = (overrides: Partial<ExplorationNode> = {}): ExplorationNode => 
   metadata: {},
   evidenceSummary: '',
   ...overrides,
+})
+
+describe('nodeRadius', () => {
+  it('returns half the node size', () => {
+    expect(nodeRadius('topic')).toBe(40)    // size 80 / 2
+    expect(nodeRadius('idea')).toBe(28)     // size 56 / 2
+    expect(nodeRadius('unknown')).toBe(22)  // fallback size 44 / 2
+  })
 })
 
 describe('nodeConfig', () => {

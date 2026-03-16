@@ -208,10 +208,16 @@ export async function createExploration(input: CreateExplorationRequest) {
       topic: input.topic,
       goal: input.outputGoal,
       output_goal: input.outputGoal,
-      constraints: input.constraints ? [input.constraints] : [],
+      constraints: input.constraints ?? '',
     }),
   })
   if (v1Created && v1Created.status === 201) {
+    // Kick off the agent cycle
+    await requestV1(`/workspaces/${v1Created.data.workspace.id}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trigger: 'manual' }),
+    })
     const payload = await loadV1Payload(v1Created.data.workspace.id)
     if (payload) return payload
   }

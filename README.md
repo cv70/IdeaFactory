@@ -76,8 +76,6 @@ npm run build
 npm run lint
 ```
 
-如果要理解当前后端执行模型，优先阅读 [backend/deep/README.md](backend/deep/README.md) 和 `backend/deep/` 下的 `agents/`、`generic/`、`tools/`、`params/` 目录。
-
 ## 路线图
 
 ### 阶段一：探索内核定型

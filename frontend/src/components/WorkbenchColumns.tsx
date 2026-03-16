@@ -1,4 +1,5 @@
 import type { ExplorationSession, Node, WorkbenchView } from '../types/exploration'
+import { useTranslation } from '../lib/i18n'
 
 type WorkbenchColumnsProps = {
   session: ExplorationSession
@@ -10,14 +11,15 @@ type WorkbenchColumnsProps = {
 
 export function WorkbenchColumns(props: WorkbenchColumnsProps) {
   const { session, view } = props
+  const { t } = useTranslation()
 
   return (
     <section className="workbench">
       <article className="columnPanel">
         <div className="sectionIntro">
-          <p className="sectionLabel">Map</p>
-          <h2>Direction map</h2>
-          <p>{session.topic} reframed as expandable exploration branches.</p>
+          <p className="sectionLabel">{t('map.label')}</p>
+          <h2>{t('map.title')}</h2>
+          <p>{session.topic}</p>
         </div>
 
         <div className="stackList">
@@ -41,22 +43,22 @@ export function WorkbenchColumns(props: WorkbenchColumnsProps) {
 
       <article className="columnPanel">
         <div className="sectionIntro">
-          <p className="sectionLabel">Reasoning</p>
-          <h2>Question trail</h2>
+          <p className="sectionLabel">{t('reasoning.label')}</p>
+          <h2>{t('reasoning.title')}</h2>
           <p>{view.activeOpportunity.summary}</p>
         </div>
 
         <div className="stackList">
           {view.questionTrail.map((question) => (
             <section key={question.id} className="detailCard">
-              <p className="detailLabel">Question</p>
+              <p className="detailLabel">{t('map.question')}</p>
               <h3>{question.title.replace(`${session.topic}: `, '')}</h3>
               <p>{question.summary}</p>
             </section>
           ))}
           {view.hypothesisTrail.map((hypothesis) => (
             <section key={hypothesis.id} className="detailCard accentCard">
-              <p className="detailLabel">Hypothesis</p>
+              <p className="detailLabel">{t('map.hypothesis')}</p>
               <h3>{hypothesis.title}</h3>
               <p>{hypothesis.summary}</p>
             </section>
@@ -68,15 +70,15 @@ export function WorkbenchColumns(props: WorkbenchColumnsProps) {
           className="secondaryAction"
           onClick={() => props.onExpandOpportunity(view.activeOpportunity)}
         >
-          Expand this branch
+          {t('map.expandButton')}
         </button>
       </article>
 
       <article className="columnPanel">
         <div className="sectionIntro">
-          <p className="sectionLabel">Materialization</p>
-          <h2>Materialized ideas</h2>
-          <p>Concrete outputs growing from the currently selected path.</p>
+          <p className="sectionLabel">{t('materialization.label')}</p>
+          <h2>{t('materialization.title')}</h2>
+          <p>{t('materialization.description')}</p>
         </div>
 
         <div className="stackList">
@@ -91,11 +93,13 @@ export function WorkbenchColumns(props: WorkbenchColumnsProps) {
                     className="miniAction"
                     onClick={() => props.onToggleFavorite(idea)}
                   >
-                    {favored ? 'Unsave idea' : 'Save idea'}
+                    {favored ? t('idea.unsave') : t('idea.save')}
                   </button>
                 </div>
                 <p>{idea.summary}</p>
-                <p className="evidenceText">{idea.evidenceSummary}</p>
+                {idea.evidenceSummary ? (
+                  <p className="evidenceText">{idea.evidenceSummary}</p>
+                ) : null}
               </section>
             )
           })}

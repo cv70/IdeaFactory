@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Node, WorkbenchView } from '../types/exploration'
 import type { RuntimeStrategy } from '../types/exploration'
+import { useTranslation } from '../lib/i18n'
 
 type SidebarPanelProps = {
   savedIdeas: Node[]
@@ -26,6 +27,7 @@ type SidebarPanelProps = {
 }
 
 export function SidebarPanel(props: SidebarPanelProps) {
+  const { t } = useTranslation()
   const [intervalMs, setIntervalMs] = useState(String(props.strategy?.interval_ms ?? 4000))
   const [maxRuns, setMaxRuns] = useState(String(props.strategy?.max_runs ?? 30))
   const [expansionMode, setExpansionMode] = useState<'active' | 'round_robin'>(
@@ -82,67 +84,69 @@ export function SidebarPanel(props: SidebarPanelProps) {
   return (
     <aside className="sidebarPanel">
       <section className="sidebarSection">
-        <p className="sectionLabel">Intervention</p>
-        <h2>Submit intervention</h2>
+        <p className="sectionLabel">{t('sidebar.intervention.label')}</p>
+        <h2>{t('sidebar.intervention.title')}</h2>
         <div className="strategyPanel">
-          <label htmlFor="intervention">Intervention</label>
-          <textarea
-            id="intervention"
-            value={interventionText}
-            onChange={(event) => setInterventionText(event.target.value)}
-          />
+          <label className="field">
+            <span>{t('sidebar.intervention.label')}</span>
+            <textarea
+              value={interventionText}
+              onChange={(event) => setInterventionText(event.target.value)}
+              placeholder={t('sidebar.intervention.placeholder')}
+              rows={3}
+            />
+          </label>
           <button
             type="button"
+            className="primaryAction"
             onClick={() => {
               props.onSubmitIntervention(interventionText)
               setInterventionText('')
             }}
+            disabled={!interventionText.trim()}
           >
-            Submit intervention
+            {t('sidebar.intervention.button')}
           </button>
           {props.lastInterventionStatus ? (
-            <p>Status: {props.lastInterventionStatus}</p>
+            <p className="statusBadge">
+              <span className="statusDot" />
+              {t('sidebar.intervention.statusLabel')} {props.lastInterventionStatus}
+            </p>
           ) : null}
           {props.lastInterventionIntent ? (
-            <p>{props.lastInterventionIntent}</p>
+            <p className="interventionEcho">{props.lastInterventionIntent}</p>
           ) : null}
         </div>
       </section>
 
       <section className="sidebarSection">
-        <p className="sectionLabel">Governance</p>
-        <h2>Runtime strategy</h2>
+        <p className="sectionLabel">{t('sidebar.strategy.label')}</p>
+        <h2>{t('sidebar.strategy.title')}</h2>
         <div className="strategyPanel">
           <p className="strategySummary">
-            Live strategy:
+            {t('sidebar.strategy.livePrefix')}
             {' '}
-            {props.strategy?.expansion_mode ?? 'active'}
-            {' '}
-            /
-            {' '}
-            {props.strategy?.interval_ms ?? 4000}
-            ms
-            {' '}
-            /
-            {' '}
-            {props.strategy?.max_runs ?? 30}
-            runs
+            <strong>{props.strategy?.expansion_mode ?? 'active'}</strong>
+            {' / '}
+            <strong>{props.strategy?.interval_ms ?? 4000}ms</strong>
+            {' / '}
+            <strong>{props.strategy?.max_runs ?? 30}</strong>
           </p>
 
           <div className="strategyPresetRow">
             <button type="button" className="chipButton" onClick={() => applyPreset('balanced')} disabled={props.strategyBusy}>
-              Balanced
+              {t('sidebar.strategy.balanced')}
             </button>
             <button type="button" className="chipButton" onClick={() => applyPreset('rapid')} disabled={props.strategyBusy}>
-              Rapid Scan
+              {t('sidebar.strategy.rapid')}
             </button>
             <button type="button" className="chipButton" onClick={() => applyPreset('focused')} disabled={props.strategyBusy}>
-              Focus Active
+              {t('sidebar.strategy.focused')}
             </button>
           </div>
 
           <label className="field">
-            <span>Interval (ms)</span>
+            <span>{t('sidebar.strategy.intervalMs')}</span>
             <input
               type="number"
               min={500}
@@ -153,7 +157,7 @@ export function SidebarPanel(props: SidebarPanelProps) {
           </label>
 
           <label className="field">
-            <span>Max runs</span>
+            <span>{t('sidebar.strategy.maxRuns')}</span>
             <input
               type="number"
               min={1}
@@ -164,25 +168,25 @@ export function SidebarPanel(props: SidebarPanelProps) {
           </label>
 
           <label className="field">
-            <span>Expansion mode</span>
+            <span>{t('sidebar.strategy.expansionMode')}</span>
             <select
               className="strategySelect"
               value={expansionMode}
               onChange={(event) => setExpansionMode(event.target.value as 'active' | 'round_robin')}
             >
-              <option value="active">Active branch</option>
-              <option value="round_robin">Round robin</option>
+              <option value="active">{t('sidebar.strategy.activeBranch')}</option>
+              <option value="round_robin">{t('sidebar.strategy.roundRobin')}</option>
             </select>
           </label>
 
           <label className="field">
-            <span>Preferred branch</span>
+            <span>{t('sidebar.strategy.preferredBranch')}</span>
             <select
               className="strategySelect"
               value={preferredBranchId}
               onChange={(event) => setPreferredBranchId(event.target.value)}
             >
-              <option value="">None</option>
+              <option value="">{t('sidebar.strategy.none')}</option>
               {props.view.opportunities.map((opportunity) => (
                 <option key={opportunity.id} value={opportunity.id}>
                   {opportunity.title}
@@ -191,18 +195,23 @@ export function SidebarPanel(props: SidebarPanelProps) {
             </select>
           </label>
 
-          <button type="button" className="secondaryAction" onClick={applyCurrentStrategy} disabled={props.strategyBusy}>
-            {props.strategyBusy ? 'Updating strategy...' : 'Apply strategy'}
+          <button
+            type="button"
+            className="secondaryAction"
+            onClick={applyCurrentStrategy}
+            disabled={props.strategyBusy}
+          >
+            {props.strategyBusy ? t('sidebar.strategy.applying') : t('sidebar.strategy.apply')}
           </button>
         </div>
       </section>
 
       <section className="sidebarSection">
-        <p className="sectionLabel">History</p>
-        <h2>Strategy history</h2>
+        <p className="sectionLabel">{t('sidebar.history.label')}</p>
+        <h2>{t('sidebar.history.title')}</h2>
         <div className="stackList">
           {props.strategyHistory.length === 0 ? (
-            <p className="emptyState">No strategy updates yet.</p>
+            <p className="emptyState">{t('sidebar.history.empty')}</p>
           ) : (
             props.strategyHistory.map((entry) => (
               <article key={entry.id} className="runCard">
@@ -211,16 +220,10 @@ export function SidebarPanel(props: SidebarPanelProps) {
                 </p>
                 <p>
                   {entry.strategy.expansion_mode}
-                  {' '}
-                  /
-                  {' '}
-                  {entry.strategy.interval_ms}
-                  ms
-                  {' '}
-                  /
-                  {' '}
+                  {' / '}
+                  {entry.strategy.interval_ms}ms
+                  {' / '}
                   {entry.strategy.max_runs}
-                  runs
                 </p>
                 <button
                   type="button"
@@ -228,7 +231,7 @@ export function SidebarPanel(props: SidebarPanelProps) {
                   onClick={() => props.onRollbackStrategy(entry.strategy)}
                   disabled={props.strategyBusy}
                 >
-                  Rollback
+                  {t('sidebar.history.rollback')}
                 </button>
               </article>
             ))
@@ -237,11 +240,11 @@ export function SidebarPanel(props: SidebarPanelProps) {
       </section>
 
       <section className="sidebarSection">
-        <p className="sectionLabel">Saved</p>
-        <h2>Saved ideas ({props.savedIdeas.length})</h2>
+        <p className="sectionLabel">{t('sidebar.saved.label')}</p>
+        <h2>{t('sidebar.saved.titlePrefix')} ({props.savedIdeas.length})</h2>
         <div className="stackList">
           {props.savedIdeas.length === 0 ? (
-            <p className="emptyState">No saved ideas yet.</p>
+            <p className="emptyState">{t('sidebar.saved.empty')}</p>
           ) : (
             props.savedIdeas.map((idea) => (
               <article key={idea.id} className="savedCard">
@@ -252,7 +255,7 @@ export function SidebarPanel(props: SidebarPanelProps) {
                   className="miniAction"
                   onClick={() => props.onToggleFavorite(idea)}
                 >
-                  Unsave idea
+                  {t('idea.unsave')}
                 </button>
               </article>
             ))
@@ -261,12 +264,12 @@ export function SidebarPanel(props: SidebarPanelProps) {
       </section>
 
       <section className="sidebarSection">
-        <p className="sectionLabel">Runs</p>
-        <h2>Recent run notes</h2>
+        <p className="sectionLabel">{t('sidebar.runs.label')}</p>
+        <h2>{t('sidebar.runs.title')}</h2>
         <div className="stackList">
           {props.view.runNotes.map((run) => (
             <article key={run.id} className="runCard">
-              <p className="detailLabel">Round {run.round}</p>
+              <p className="detailLabel">{t('sidebar.runs.roundPrefix')} {run.round}</p>
               <p>{run.summary}</p>
             </article>
           ))}
