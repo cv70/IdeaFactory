@@ -75,3 +75,28 @@ export function buildRFNode(node: ExplorationNode, entering: boolean): RFNode<RF
 export function buildRFEdge(edge: ExplorationEdge): RFEdge {
   return { id: edge.id, source: edge.from, target: edge.to }
 }
+
+// ─── Custom node ──────────────────────────────────────────────────────────────
+
+function IdeaNode({ data, selected }: NodeProps<IdeaNodeType>) {
+  const cfg = nodeConfig(data.type)
+  return (
+    <div
+      className={`ideaNode${selected ? ' ideaNodeSelected' : ''}`}
+      style={{
+        '--node-fill': cfg.fill,
+        '--node-stroke': cfg.stroke,
+        '--node-size': `${cfg.size}px`,
+      } as React.CSSProperties}
+    >
+      <div className="ideaNodeCircle">
+        <span className="ideaNodeGlyph">{cfg.glyph}</span>
+      </div>
+      <div className="ideaNodeLabel">{data.title}</div>
+      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+    </div>
+  )
+}
+
+const nodeTypes = { ideaNode: IdeaNode }
