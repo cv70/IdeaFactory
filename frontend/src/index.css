@@ -1,26 +1,35 @@
+@import '@xyflow/react/dist/style.css';
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap');
+
 :root {
   font-family:
-    "Space Grotesk",
-    "IBM Plex Sans",
-    "Avenir Next",
+    'Space Grotesk',
+    'IBM Plex Sans',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Hiragino Sans GB',
     sans-serif;
-  line-height: 1.5;
+  line-height: 1.55;
   font-weight: 400;
   color: #12193a;
   background:
-    radial-gradient(circle at top left, rgba(121, 170, 255, 0.24), transparent 28rem),
-    radial-gradient(circle at 85% 12%, rgba(255, 214, 153, 0.35), transparent 24rem),
-    linear-gradient(180deg, #f7f1e8 0%, #f4efe9 35%, #eef3fa 100%);
+    radial-gradient(circle at top left, rgba(121, 170, 255, 0.22), transparent 30rem),
+    radial-gradient(circle at 85% 10%, rgba(255, 214, 153, 0.3), transparent 26rem),
+    radial-gradient(circle at 50% 80%, rgba(180, 140, 255, 0.1), transparent 30rem),
+    linear-gradient(175deg, #f8f3ec 0%, #f3eee9 35%, #edf2fb 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --panel-bg: rgba(255, 251, 246, 0.72);
-  --panel-border: rgba(23, 42, 92, 0.1);
-  --panel-shadow: 0 24px 60px rgba(30, 45, 90, 0.08);
+
+  --panel-bg: rgba(255, 252, 248, 0.78);
+  --panel-border: rgba(23, 42, 92, 0.08);
+  --panel-shadow: 0 8px 40px rgba(30, 45, 90, 0.07), 0 1px 3px rgba(30, 45, 90, 0.04);
   --main-ink: #12193a;
   --muted-ink: #5d6787;
   --accent-ink: #a14d00;
+  --blue-accent: #2851b0;
+  --surface: rgba(255, 255, 255, 0.88);
 }
 
 * {
@@ -38,19 +47,20 @@ body {
 }
 
 body::before {
-  content: "";
+  content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background-image: linear-gradient(rgba(18, 25, 58, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(18, 25, 58, 0.02) 1px, transparent 1px);
+  background-image:
+    linear-gradient(rgba(18, 25, 58, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(18, 25, 58, 0.018) 1px, transparent 1px);
   background-size: 32px 32px;
-  mask-image: radial-gradient(circle at center, black 38%, transparent 88%);
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 82%);
 }
 
 #root {
   min-height: 100vh;
-  padding: 1rem;
+  padding: 1.25rem 1rem;
 }
 
 a {
