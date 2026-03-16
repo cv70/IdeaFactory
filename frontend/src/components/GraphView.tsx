@@ -1,6 +1,6 @@
 import * as d3 from 'd3-force'
 import {
-  useState, useEffect, useRef, useMemo,
+  useEffect, useRef, useMemo,
 } from 'react'
 import {
   ReactFlow, ReactFlowProvider,
@@ -378,6 +378,8 @@ export function GraphView({ session, selectedNodeId, onSelectNode, onExpandOppor
         clearTimeout(t2)
       }
     }
+    // rfNodes intentionally omitted: including it would re-run this effect on every D3 tick (position updates).
+    // enteringIds is computed once per data change, which is the correct granularity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allNodes, allEdges])
 
