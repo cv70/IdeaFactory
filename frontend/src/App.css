@@ -1,5 +1,7 @@
+/* ─── Layout ─────────────────────────────────────────────────────── */
+
 .appShell {
-  width: min(1480px, 100%);
+  width: min(1520px, 100%);
   margin: 0 auto;
   display: grid;
   gap: 1.5rem;
@@ -16,36 +18,81 @@
   gap: 1.25rem;
 }
 
+@media (min-width: 860px) {
+  .appGrid {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .sidebarPanel {
+    position: sticky;
+    top: 1.25rem;
+    max-height: calc(100vh - 2.5rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(23, 42, 92, 0.15) transparent;
+  }
+}
+
+@media (min-width: 1100px) {
+  .appGrid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  .workbench {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ─── Panels ─────────────────────────────────────────────────────── */
+
 .hero,
 .launchPanel,
 .columnPanel,
 .sidebarPanel {
   border: 1px solid var(--panel-border);
-  border-radius: 28px;
+  border-radius: 24px;
   background: var(--panel-bg);
   box-shadow: var(--panel-shadow);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(20px);
 }
+
+.launchPanel,
+.columnPanel,
+.sidebarPanel {
+  padding: 1.4rem;
+}
+
+/* ─── Hero Header ─────────────────────────────────────────────────── */
 
 .hero {
   overflow: hidden;
   position: relative;
-  padding: 2rem;
+  padding: 2rem 2rem 2.2rem;
   background:
-    radial-gradient(circle at top right, rgba(255, 197, 112, 0.35), transparent 22rem),
-    radial-gradient(circle at left center, rgba(131, 185, 255, 0.2), transparent 20rem),
-    linear-gradient(140deg, rgba(9, 15, 36, 0.95), rgba(17, 39, 88, 0.88));
+    radial-gradient(ellipse at top right, rgba(255, 197, 112, 0.38), transparent 22rem),
+    radial-gradient(ellipse at left center, rgba(131, 185, 255, 0.22), transparent 20rem),
+    linear-gradient(140deg, rgba(9, 15, 36, 0.96), rgba(17, 39, 88, 0.9));
   color: #f7f2e8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
 }
 
 .hero::after {
-  content: "";
+  content: '';
   position: absolute;
-  inset: auto -5% -35% auto;
-  width: 18rem;
-  height: 18rem;
+  inset: auto -4% -28% auto;
+  width: 20rem;
+  height: 20rem;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(255, 181, 98, 0.25), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 181, 98, 0.22), transparent 70%);
+  pointer-events: none;
+}
+
+.heroContent {
+  flex: 1;
+  min-width: 0;
 }
 
 .eyebrow,
@@ -54,41 +101,71 @@
   margin: 0;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
 }
 
 .eyebrow {
-  color: rgba(255, 240, 215, 0.8);
+  color: rgba(255, 240, 215, 0.75);
 }
 
 .hero h1 {
-  margin: 0.55rem 0 0;
-  max-width: 12ch;
-  font-size: clamp(2.6rem, 6vw, 5.6rem);
+  margin: 0.5rem 0 0;
+  font-size: clamp(2.4rem, 5.5vw, 5rem);
   line-height: 0.92;
+  letter-spacing: -0.02em;
 }
 
 .heroCopy {
-  margin: 1rem 0 0;
-  max-width: 55ch;
-  color: rgba(247, 242, 232, 0.82);
-  font-size: 1rem;
+  margin: 0.9rem 0 0;
+  max-width: 52ch;
+  color: rgba(247, 242, 232, 0.78);
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
-.launchPanel,
-.columnPanel,
-.sidebarPanel {
-  padding: 1.25rem;
+.langToggle {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 0.2rem;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 240, 215, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 240, 215, 0.9);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 200ms ease, border-color 200ms ease;
+  position: relative;
+  z-index: 1;
 }
+
+.langToggle:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 240, 215, 0.45);
+  transform: none;
+}
+
+/* ─── Error ───────────────────────────────────────────────────────── */
 
 .errorBanner {
   margin: 0;
-  padding: 0.95rem 1rem;
-  border-radius: 18px;
-  border: 1px solid rgba(150, 38, 12, 0.15);
-  background: rgba(255, 232, 224, 0.86);
+  padding: 0.9rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(150, 38, 12, 0.18);
+  background: rgba(255, 230, 220, 0.9);
   color: #8f2f17;
+  font-size: 0.9rem;
+}
+
+/* ─── Section Intro ───────────────────────────────────────────────── */
+
+.sectionIntro {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 1.1rem;
 }
 
 .sectionIntro h2,
@@ -97,12 +174,9 @@
 .ideaCard h3,
 .savedCard h3 {
   margin: 0;
-}
-
-.sectionIntro {
-  display: grid;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .sectionIntro p:last-child,
@@ -111,71 +185,97 @@
 .detailCard p,
 .ideaCard p {
   margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted-ink);
+  line-height: 1.5;
 }
 
 .sectionLabel {
   color: var(--accent-ink);
 }
 
+/* ─── Form ────────────────────────────────────────────────────────── */
+
 .launchForm,
 .stackList,
 .sidebarSection {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.85rem;
 }
 
 .field {
   display: grid;
-  gap: 0.4rem;
-  font-size: 0.92rem;
+  gap: 0.38rem;
+  font-size: 0.88rem;
   color: var(--muted-ink);
 }
 
 .field span {
   font-weight: 600;
+  color: var(--main-ink);
+  font-size: 0.84rem;
 }
 
 .field input,
 .field textarea,
 .field select {
   width: 100%;
-  border: 1px solid rgba(25, 37, 77, 0.12);
-  border-radius: 16px;
-  padding: 0.95rem 1rem;
-  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(25, 37, 77, 0.14);
+  border-radius: 12px;
+  padding: 0.82rem 0.95rem;
+  background: var(--surface);
   color: var(--main-ink);
   font: inherit;
+  font-size: 0.92rem;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.field input:hover,
+.field textarea:hover,
+.field select:hover {
+  border-color: rgba(25, 37, 77, 0.24);
 }
 
 .field textarea {
   resize: vertical;
-  min-height: 7rem;
+  min-height: 6.5rem;
 }
+
+/* ─── Strategy ────────────────────────────────────────────────────── */
 
 .strategyPanel {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.72rem;
 }
 
 .strategySummary {
   margin: 0;
   color: var(--muted-ink);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(23, 42, 92, 0.04);
+  border-radius: 10px;
 }
 
 .strategyPresetRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .strategySelect {
   appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235d6787' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
+  padding-right: 2.4rem;
 }
+
+/* ─── Buttons ─────────────────────────────────────────────────────── */
 
 .launchActions {
   display: grid;
-  gap: 0.8rem;
+  gap: 0.75rem;
 }
 
 .primaryAction,
@@ -194,78 +294,118 @@
   border: 1px solid transparent;
   cursor: pointer;
   transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    background 180ms ease;
+    transform 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .primaryAction {
   justify-self: start;
-  padding: 0.8rem 1.2rem;
+  padding: 0.78rem 1.4rem;
   background: linear-gradient(135deg, #101a3f, #2851b0);
   color: #fdf7ec;
   font-weight: 700;
+  font-size: 0.92rem;
+  box-shadow: 0 4px 16px rgba(40, 81, 176, 0.3);
+}
+
+.primaryAction:hover:not(:disabled) {
+  box-shadow: 0 6px 24px rgba(40, 81, 176, 0.42);
 }
 
 .secondaryAction {
   justify-self: start;
-  padding: 0.8rem 1.1rem;
-  background: rgba(19, 30, 62, 0.08);
-  border-color: rgba(19, 30, 62, 0.12);
+  padding: 0.72rem 1.1rem;
+  background: rgba(19, 30, 62, 0.07);
+  border-color: rgba(19, 30, 62, 0.14);
   color: var(--main-ink);
+  font-size: 0.88rem;
 }
 
 .miniAction {
-  padding: 0.5rem 0.8rem;
-  background: rgba(23, 49, 113, 0.08);
+  padding: 0.42rem 0.82rem;
+  background: rgba(23, 49, 113, 0.07);
   border-color: rgba(23, 49, 113, 0.12);
   color: var(--main-ink);
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 .exampleRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
 .chipButton {
-  padding: 0.55rem 0.85rem;
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(16, 26, 63, 0.1);
+  padding: 0.48rem 0.88rem;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(16, 26, 63, 0.11);
   color: var(--muted-ink);
+  font-size: 0.82rem;
 }
 
-.workbench {
-  display: grid;
-  gap: 1rem;
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(50, 100, 214, 0.28);
+  outline-offset: 2px;
+}
+
+/* ─── Workspace cards ─────────────────────────────────────────────── */
 
 .workspaceList {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.6rem;
 }
 
 .workspaceCard {
   text-align: left;
-  border: 1px solid rgba(16, 26, 63, 0.09);
-  border-radius: 18px;
-  padding: 0.85rem 0.95rem;
-  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 0.8rem 1rem;
+  background: var(--surface);
   display: grid;
-  gap: 0.2rem;
+  gap: 0.18rem;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.workspaceCard:hover {
+  border-color: rgba(34, 79, 186, 0.22);
+  box-shadow: 0 4px 16px rgba(34, 79, 186, 0.06);
 }
 
 .workspaceCardActive {
-  border-color: rgba(34, 79, 186, 0.35);
+  border-color: rgba(34, 79, 186, 0.32);
   background:
-    linear-gradient(180deg, rgba(34, 79, 186, 0.14), rgba(255, 255, 255, 0.82)),
+    linear-gradient(180deg, rgba(34, 79, 186, 0.1), rgba(255, 255, 255, 0.82)),
     rgba(255, 255, 255, 0.7);
+  box-shadow: 0 4px 20px rgba(34, 79, 186, 0.1);
 }
 
 .workspaceActions {
   display: flex;
-  gap: 0.45rem;
-  margin-top: 0.25rem;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+/* ─── Workbench ───────────────────────────────────────────────────── */
+
+.workbench {
+  display: grid;
+  gap: 1rem;
 }
 
 .branchCard,
@@ -274,29 +414,38 @@
 .savedCard,
 .runCard {
   text-align: left;
-  border: 1px solid rgba(16, 26, 63, 0.09);
-  border-radius: 22px;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 0.95rem 1rem;
+  background: var(--surface);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .branchCard {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
+.branchCard:hover {
+  border-color: rgba(34, 79, 186, 0.22);
+  box-shadow: 0 4px 16px rgba(34, 79, 186, 0.06);
 }
 
 .branchCardActive {
   background:
-    linear-gradient(180deg, rgba(34, 79, 186, 0.16), rgba(255, 255, 255, 0.78)),
+    linear-gradient(180deg, rgba(34, 79, 186, 0.12), rgba(255, 255, 255, 0.82)),
     rgba(255, 255, 255, 0.7);
   border-color: rgba(34, 79, 186, 0.35);
+  box-shadow: 0 4px 20px rgba(34, 79, 186, 0.12);
   transform: translateY(-1px);
 }
 
 .branchTitle {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: var(--main-ink);
+  line-height: 1.35;
 }
 
 .branchSummary,
@@ -306,10 +455,13 @@
 .runCard p,
 .emptyState {
   color: var(--muted-ink);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .accentCard {
-  background: linear-gradient(180deg, rgba(255, 205, 143, 0.26), rgba(255, 255, 255, 0.78));
+  background: linear-gradient(180deg, rgba(255, 205, 143, 0.22), rgba(255, 255, 255, 0.82));
+  border-color: rgba(161, 77, 0, 0.12);
 }
 
 .detailLabel {
@@ -318,65 +470,224 @@
 
 .ideaHeader {
   display: flex;
-  align-items: start;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.8rem;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.55rem;
 }
 
 .evidenceText {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
+  color: var(--muted-ink);
+  margin-top: 0.4rem !important;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--panel-border);
 }
+
+/* ─── Sidebar ─────────────────────────────────────────────────────── */
 
 .sidebarPanel {
   display: grid;
-  gap: 1rem;
+  gap: 1.2rem;
 }
 
 .sidebarSection {
-  gap: 0.7rem;
+  display: grid;
+  gap: 0.65rem;
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.sidebarSection:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .savedCard,
 .runCard {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
 .emptyState {
-  padding: 0.4rem 0;
+  padding: 0.35rem 0;
+  font-style: italic;
 }
 
-button:hover {
-  transform: translateY(-1px);
+/* ─── Status / Feedback ───────────────────────────────────────────── */
+
+.statusBadge {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--muted-ink);
 }
 
-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-  transform: none;
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
 }
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid rgba(50, 100, 214, 0.3);
-  outline-offset: 2px;
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
-@media (min-width: 860px) {
-  .appGrid {
-    grid-template-columns: minmax(0, 1fr) 320px;
-  }
-
-  .sidebarPanel {
-    position: sticky;
-    top: 1rem;
-  }
+.interventionEcho {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted-ink);
+  font-style: italic;
+  padding: 0.5rem 0.75rem;
+  background: rgba(23, 42, 92, 0.04);
+  border-radius: 10px;
+  border-left: 3px solid rgba(40, 81, 176, 0.25);
 }
 
-@media (min-width: 1100px) {
-  .workbench {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+/* ─── Graph View ──────────────────────────────────────────────────── */
+
+.graphContainer {
+  position: relative;
+  height: 70vh;
+  min-height: 480px;
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  background: var(--panel-bg);
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+}
+
+.graphEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-ink);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+/* React Flow wrapper must fill the container */
+.graphContainer .react-flow {
+  border-radius: 24px;
+}
+
+/* ─── Idea Node ───────────────────────────────────────────────────── */
+
+.ideaNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.ideaNodeCircle {
+  width: var(--node-size);
+  height: var(--node-size);
+  border-radius: 50%;
+  background: var(--node-fill);
+  border: 2px solid var(--node-stroke);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 150ms ease;
+}
+
+.ideaNodeSelected .ideaNodeCircle {
+  box-shadow: 0 0 0 3px #fff, 0 0 20px rgba(255, 255, 255, 0.4);
+}
+
+.ideaNodeGlyph {
+  font-size: calc(var(--node-size) * 0.36);
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1;
+  user-select: none;
+}
+
+.ideaNodeLabel {
+  max-width: 120px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--main-ink);
+  line-height: 1.3;
+  word-break: break-word;
+  pointer-events: none;
+}
+
+/* ─── Node Entry Animation ────────────────────────────────────────── */
+
+@keyframes nodeEnter {
+  from { opacity: 0; transform: scale(0.3); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.nodeEnter .ideaNodeCircle,
+.nodeEnter .ideaNodeLabel {
+  animation: nodeEnter 450ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+/* ─── Node Detail Card ────────────────────────────────────────────── */
+
+.nodeDetailCard {
+  position: absolute;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 280px;
+  padding: 1.2rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  background: rgba(255, 252, 248, 0.96);
+  box-shadow: 0 8px 32px rgba(30, 45, 90, 0.12);
+  backdrop-filter: blur(12px);
+  display: grid;
+  gap: 0.6rem;
+  z-index: 10;
+}
+
+.nodeTypeBadge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  width: fit-content;
+}
+
+.nodeDetailCard h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--main-ink);
+}
+
+.nodeDetailSummary {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted-ink);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nodeScore {
+  font-size: 0.8rem;
+  color: var(--accent-ink);
+  font-weight: 600;
 }
