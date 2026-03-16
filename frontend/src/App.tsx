@@ -391,7 +391,7 @@ function App() {
 
   return (
     <LangContext.Provider value={{ lang, setLang, t: makeT(lang) }}>
-    <div className="appShell">
+      <div className="appShell">
       <AppHeader />
 
       <main className="appGrid">
@@ -444,7 +444,7 @@ function App() {
           />
         ) : null}
       </main>
-    </div>
+      </div>
     </LangContext.Provider>
   )
 }
