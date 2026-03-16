@@ -100,3 +100,115 @@ function IdeaNode({ data, selected }: NodeProps<IdeaNodeType>) {
 }
 
 const nodeTypes = { ideaNode: IdeaNode }
+
+// ─── Node detail card ─────────────────────────────────────────────────────────
+
+type NodeDetailCardProps = {
+  selectedNode: ExplorationNode | null
+  onSelectNode: (node: ExplorationNode | null) => void
+  onExpandOpportunity: (node: ExplorationNode) => void
+}
+
+function NodeDetailCard({ selectedNode, onSelectNode, onExpandOpportunity }: NodeDetailCardProps) {
+  const { t } = useTranslation()
+  if (!selectedNode) return null
+  const cfg = nodeConfig(selectedNode.type)
+  return (
+    <div className="nodeDetailCard">
+      <span className="nodeTypeBadge" style={{ background: cfg.fill }}>
+        {selectedNode.type}
+      </span>
+      <h3>{selectedNode.title}</h3>
+      <p className="nodeDetailSummary">{selectedNode.summary}</p>
+      {selectedNode.score > 0 && (
+        <span className="nodeScore">⚡ {selectedNode.score.toFixed(2)}</span>
+      )}
+      {(selectedNode.type === 'direction' || selectedNode.type === 'opportunity') && (
+        <button className="primaryAction" onClick={() => onExpandOpportunity(selectedNode)}>
+          {t('graph.expandButton')}
+        </button>
+      )}
+      <button className="miniAction" onClick={() => onSelectNode(null)}>
+        {t('graph.dismiss')}
+      </button>
+    </div>
+  )
+}
+
+// ─── GraphCanvas (inner — must live inside <ReactFlow>) ───────────────────────
+
+type GraphCanvasProps = {
+  rfNodes: RFNode<RFNodeData, 'ideaNode'>[]
+  rfEdges: RFEdge[]
+  onNodesChange: ReturnType<typeof useNodesState<RFNode<RFNodeData, 'ideaNode'>>>[2]
+  onEdgesChange: ReturnType<typeof useEdgesState>[2]
+  selectedNode: ExplorationNode | null
+  onSelectNode: (node: ExplorationNode | null) => void
+  onExpandOpportunity: (node: ExplorationNode) => void
+  onNodeDragStart: (event: React.MouseEvent, node: RFNode) => void
+  onNodeDrag: (event: React.MouseEvent, node: RFNode) => void
+  onNodeDragStop: (event: React.MouseEvent, node: RFNode) => void
+}
+
+function GraphCanvas({
+  rfNodes,
+  rfEdges,
+  onNodesChange,
+  onEdgesChange,
+  selectedNode,
+  onSelectNode,
+  onExpandOpportunity,
+  onNodeDragStart,
+  onNodeDrag,
+  onNodeDragStop,
+}: GraphCanvasProps) {
+  const { fitView } = useReactFlow()
+
+  useEffect(() => {
+    if (rfNodes.length > 0) {
+      fitView({ padding: 0.15, duration: 400 })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfNodes.length, fitView])
+
+  return (
+    <>
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        nodeTypes={nodeTypes}
+        defaultEdgeOptions={{
+          type: 'smoothstep',
+          style: { stroke: 'rgba(23,42,92,0.15)', strokeWidth: 1.5 },
+        }}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodesDraggable={true}
+        nodesConnectable={false}
+        elementsSelectable={true}
+        panOnDrag={true}
+        zoomOnScroll={true}
+        fitView
+        fitViewOptions={{ padding: 0.15, duration: 400 }}
+        onNodeClick={(_, rfNode) =>
+          onSelectNode(rfNode.data.original as ExplorationNode)
+        }
+        onPaneClick={() => onSelectNode(null)}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        minZoom={0.1}
+        maxZoom={4}
+      >
+        <Background color="rgba(23,42,92,0.04)" gap={32} />
+        <Controls showInteractive={false} />
+        <MiniMap nodeColor={(n) => nodeConfig(n.data?.type as string).fill} />
+      </ReactFlow>
+      <NodeDetailCard
+        selectedNode={selectedNode}
+        onSelectNode={onSelectNode}
+        onExpandOpportunity={onExpandOpportunity}
+      />
+    </>
+  )
+}
