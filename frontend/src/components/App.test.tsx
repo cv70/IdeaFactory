@@ -24,7 +24,7 @@ describe('idea factory app', () => {
     fireEvent.change(screen.getByLabelText('输出目标'), { target: { value: 'Research directions' } })
     fireEvent.click(screen.getByRole('button', { name: '开始探索' }))
 
-    expect(await screen.findByRole('button', { name: 'Archive' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '归档' })).toBeInTheDocument()
     expect(await screen.findByText('运行策略')).toBeInTheDocument()
     expect(screen.getByText('提交干预')).toBeInTheDocument()
     expect(screen.getByText('策略历史')).toBeInTheDocument()
@@ -116,8 +116,8 @@ describe('idea factory app', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始探索' }))
 
     // Archive button appears in WorkspaceHeader
-    expect(await screen.findByRole('button', { name: 'Archive' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+    expect(await screen.findByRole('button', { name: '归档' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
 
     await waitFor(() => {
       // After archive, viewMode returns to 'launch' — LaunchPanel shown, empty state in sidebar

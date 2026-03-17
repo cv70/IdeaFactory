@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
+import { LangContext, makeT } from '../lib/i18n'
 import { WorkspaceHeader } from './WorkspaceHeader'
 
 function renderHeader(overrides: Partial<React.ComponentProps<typeof WorkspaceHeader>> = {}) {
@@ -10,7 +11,14 @@ function renderHeader(overrides: Partial<React.ComponentProps<typeof WorkspaceHe
     onArchive: vi.fn(),
     ...overrides,
   }
-  return { ...render(<WorkspaceHeader {...props} />), props }
+  return {
+    ...render(
+      <LangContext.Provider value={{ lang: 'en', setLang: vi.fn(), t: makeT('en') }}>
+        <WorkspaceHeader {...props} />
+      </LangContext.Provider>
+    ),
+    props,
+  }
 }
 
 describe('WorkspaceHeader', () => {

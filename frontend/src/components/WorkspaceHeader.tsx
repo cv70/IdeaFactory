@@ -1,3 +1,5 @@
+import { useTranslation } from '../lib/i18n'
+
 type WorkspaceHeaderProps = {
   topic: string
   loading?: boolean
@@ -6,6 +8,7 @@ type WorkspaceHeaderProps = {
 }
 
 export function WorkspaceHeader(props: WorkspaceHeaderProps) {
+  const { t } = useTranslation()
   return (
     <div className="workspaceHeader">
       <span className="workspaceTitle">{props.topic}</span>
@@ -19,7 +22,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
           onClick={props.onArchive}
           disabled={props.loading}
         >
-          Archive
+          {t('workspaces.archive')}
         </button>
       </div>
     </div>
