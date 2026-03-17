@@ -123,11 +123,14 @@ function IdeaNode({ data, selected }: NodeProps<IdeaNodeType>) {
 
 const nodeTypes = { ideaNode: IdeaNode }
 
+// ─── Custom edge ──────────────────────────────────────────────────────────────
+
 function FloatingEdge({ id, source, target, markerEnd, style }: EdgeProps) {
   const sourceNode = useInternalNode(source)
   const targetNode = useInternalNode(target)
 
   if (!sourceNode || !targetNode) return null
+  // cy uses the type-derived nodeRadius constant, so measured.height is not needed
   if (!sourceNode.measured?.width || !targetNode.measured?.width) return null
 
   const sr = nodeRadius(sourceNode.data?.type as string)
@@ -342,11 +345,11 @@ export function GraphView({ session, selectedNodeId, onSelectNode, onExpandOppor
       .forceSimulation<SimNode>()
       .force(
         'link',
-        d3.forceLink<SimNode, SimLink>().id((d) => d.id).distance(130).strength(0.4),
+        d3.forceLink<SimNode, SimLink>().id((d) => d.id).distance(160).strength(0.4),
       )
-      .force('charge', d3.forceManyBody<SimNode>().strength((d) => -(nodeRadius(d.type as string) * 18)))
+      .force('charge', d3.forceManyBody<SimNode>().strength((d) => -(nodeRadius(d.type as string) * 28)))
       .force('center', d3.forceCenter(0, 0).strength(0.05))
-      .force('collide', d3.forceCollide<SimNode>((d) => nodeRadius(d.type as string) + 12).strength(0.8))
+      .force('collide', d3.forceCollide<SimNode>((d) => nodeRadius(d.type as string) + 18).strength(0.8))
       .alphaDecay(0.02)
       .on('tick', onTick)
 
