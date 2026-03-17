@@ -19,12 +19,6 @@ export function WorkspaceManager(props: WorkspaceManagerProps) {
 
   return (
     <section className="launchPanel">
-      <div className="sectionIntro">
-        <p className="sectionLabel">{t('workspaces.label')}</p>
-        <h2>{t('workspaces.title')}</h2>
-        <p>{t('workspaces.description')}</p>
-      </div>
-
       <div className="workspaceList">
         {props.workspaces.length === 0 ? (
           <p className="emptyState">{t('workspaces.empty')}</p>

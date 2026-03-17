@@ -5,11 +5,12 @@ export type Lang = 'en' | 'zh'
 const translations = {
   en: {
     // Header
-    'header.tagline': 'Unified exploration graph',
     'header.title': 'Idea Factory',
-    'header.description':
-      'Build a problem space first, then materialize idea paths you can inspect, expand, and save.',
     'header.langSwitch': '中文',
+
+    // Nav sidebar
+    'nav.newExploration': 'New Exploration',
+    'nav.recent': 'Recent',
 
     // Launch panel
     'launch.label': 'Launch',
@@ -26,10 +27,6 @@ const translations = {
     'launch.startingButton': 'Starting...',
 
     // Workspaces
-    'workspaces.label': 'Workspaces',
-    'workspaces.title': 'Switch and recover',
-    'workspaces.description':
-      'Continue from previous exploration workspaces without starting over.',
     'workspaces.empty': 'No historical workspaces yet.',
     'workspaces.open': 'Open',
     'workspaces.archive': 'Archive',
@@ -102,10 +99,12 @@ const translations = {
 
   zh: {
     // Header
-    'header.tagline': '统一探索图谱',
     'header.title': '创意工厂',
-    'header.description': '先构建问题空间，再物化可检视、可扩展、可收藏的创意路径。',
     'header.langSwitch': 'English',
+
+    // Nav sidebar
+    'nav.newExploration': '新建探索',
+    'nav.recent': '最近',
 
     // Launch panel
     'launch.label': '启动',
@@ -122,9 +121,6 @@ const translations = {
     'launch.startingButton': '启动中...',
 
     // Workspaces
-    'workspaces.label': '工作空间',
-    'workspaces.title': '切换与恢复',
-    'workspaces.description': '从之前的探索工作空间继续，无需重头开始。',
     'workspaces.empty': '暂无历史工作空间。',
     'workspaces.open': '打开',
     'workspaces.archive': '归档',
