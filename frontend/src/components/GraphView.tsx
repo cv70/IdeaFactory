@@ -73,7 +73,7 @@ export function buildRFNode(node: ExplorationNode, entering: boolean): RFNode<RF
 }
 
 export function buildRFEdge(edge: ExplorationEdge): RFEdge {
-  return { id: edge.id, source: edge.from, target: edge.to }
+  return { id: edge.id, source: edge.from, target: edge.to, type: 'floating' }
 }
 
 // ─── Custom node ──────────────────────────────────────────────────────────────

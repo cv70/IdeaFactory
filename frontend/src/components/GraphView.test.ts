@@ -70,5 +70,6 @@ describe('buildRFEdge', () => {
     expect(rfEdge.id).toBe('e1')
     expect(rfEdge.source).toBe('n1')
     expect(rfEdge.target).toBe('n2')
+    expect(rfEdge.type).toBe('floating')
   })
 })
