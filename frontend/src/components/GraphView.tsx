@@ -289,7 +289,7 @@ export function GraphView({ session, selectedNodeId, onSelectNode, onExpandOppor
 
   // React Flow state
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode<RFNodeData, 'ideaNode'>>([])
-  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([])
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([])
 
   // Derived selected node
   const selectedNode = useMemo(
@@ -336,7 +336,7 @@ export function GraphView({ session, selectedNodeId, onSelectNode, onExpandOppor
         prev.map((rfNode) => {
           const simNode = simNodeMap.current.get(rfNode.id)
           if (!simNode || simNode.x == null) return rfNode
-          return { ...rfNode, position: { x: simNode.x, y: simNode.y } }
+          return { ...rfNode, position: { x: simNode.x ?? 0, y: simNode.y ?? 0 } }
         }),
       )
     }

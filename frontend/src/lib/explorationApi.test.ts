@@ -36,12 +36,12 @@ describe('explorationApi', () => {
       constraints: 'Low-cost, explainable',
     })
     const activeOpportunityId = created.data.exploration.activeOpportunityId
-    const beforeCount = created.data.presentation.ideaCards.length
+    const beforeCount = created.data.presentation!.ideaCards.length
 
     const expanded = await expandOpportunityRequest(created.data.exploration.id, activeOpportunityId)
 
     expect(expanded.code).toBe(200)
-    expect(expanded.data.presentation.ideaCards.length).toBeGreaterThan(beforeCount)
+    expect(expanded.data.presentation!.ideaCards.length).toBeGreaterThan(beforeCount)
   })
 
   it('updates favorites via feedback and returns the new snapshot', async () => {
@@ -50,7 +50,7 @@ describe('explorationApi', () => {
       outputGoal: 'Research directions',
       constraints: 'Low-cost, explainable',
     })
-    const firstIdeaId = created.data.presentation.ideaCards[0].id
+    const firstIdeaId = created.data.presentation!.ideaCards[0].id
 
     const saved = await sendFeedback(created.data.exploration.id, {
       type: 'toggle_favorite',

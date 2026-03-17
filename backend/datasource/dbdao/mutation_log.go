@@ -7,11 +7,11 @@ import (
 )
 
 type MutationLog struct {
-	gorm.DB
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	Kind        string    `json:"kind"`
-	Source      string    `json:"source"`
-	Payload     string    `json:"payload" gorm:"type:text"`
+	gorm.Model
+	WorkspaceID string `json:"workspace_id" gorm:"index"`
+	Kind        string `json:"kind"`
+	Source      string `json:"source"`
+	Payload     string `json:"payload" gorm:"type:text"`
 }
 
 func (d *DB) CreateMutationLogs(logs []MutationLog) error {

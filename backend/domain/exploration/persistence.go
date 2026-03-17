@@ -4,6 +4,7 @@ import (
 	"backend/datasource/dbdao"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -71,7 +72,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	}
 	for _, item := range snapshot.Runs {
 		projection.Runs = append(projection.Runs, dbdao.RuntimeRunRecord{
-			ID:          item.ID,
 			WorkspaceID: item.WorkspaceID,
 			Source:      item.Source,
 			Status:      string(item.Status),
@@ -81,28 +81,23 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	}
 	for _, item := range snapshot.Plans {
 		projection.Plans = append(projection.Plans, dbdao.RuntimePlanRecord{
-			ID:          item.ID,
 			WorkspaceID: item.WorkspaceID,
 			RunID:       item.RunID,
 			Version:     item.Version,
-			CreatedAtMs: item.CreatedAt,
 		})
 	}
 	for _, item := range snapshot.PlanSteps {
 		projection.PlanSteps = append(projection.PlanSteps, dbdao.RuntimePlanStepRecord{
-			ID:          item.ID,
 			WorkspaceID: item.WorkspaceID,
 			RunID:       item.RunID,
 			PlanID:      item.PlanID,
 			StepIndex:   item.Index,
 			Desc:        item.Desc,
 			Status:      string(item.Status),
-			UpdatedAtMs: item.UpdatedAt,
 		})
 	}
 	for _, item := range snapshot.AgentTasks {
 		projection.AgentTasks = append(projection.AgentTasks, dbdao.RuntimeAgentTaskRecord{
-			ID:          item.ID,
 			WorkspaceID: item.WorkspaceID,
 			RunID:       item.RunID,
 			PlanID:      item.PlanID,
@@ -110,7 +105,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 			SubAgent:    item.SubAgent,
 			Goal:        item.Goal,
 			Status:      string(item.Status),
-			UpdatedAtMs: item.UpdatedAt,
 		})
 	}
 	for _, item := range snapshot.Results {
@@ -119,7 +113,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 			WorkspaceID: workspaceID,
 			Summary:     item.Summary,
 			IsSuccess:   item.IsSuccess,
-			UpdatedAtMs: item.UpdatedAt,
 		})
 	}
 	if snapshot.Balance.WorkspaceID != "" {
@@ -153,7 +146,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		}
 		for _, item := range projection.Runs {
 			out.Runs = append(out.Runs, Run{
-				ID:          item.ID,
+				ID:          strconv.FormatUint(uint64(item.ID), 10),
 				WorkspaceID: item.WorkspaceID,
 				Source:      item.Source,
 				Status:      RunStatus(item.Status),
@@ -163,28 +156,28 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		}
 		for _, item := range projection.Plans {
 			out.Plans = append(out.Plans, ExecutionPlan{
-				ID:          item.ID,
+				ID:          strconv.FormatUint(uint64(item.ID), 10),
 				WorkspaceID: item.WorkspaceID,
 				RunID:       item.RunID,
 				Version:     item.Version,
-				CreatedAt:   item.CreatedAtMs,
+				CreatedAt:   item.CreatedAt.UnixMilli(),
 			})
 		}
 		for _, item := range projection.PlanSteps {
 			out.PlanSteps = append(out.PlanSteps, PlanStep{
-				ID:          item.ID,
+				ID:          strconv.FormatUint(uint64(item.ID), 10),
 				WorkspaceID: item.WorkspaceID,
 				RunID:       item.RunID,
 				PlanID:      item.PlanID,
 				Index:       item.StepIndex,
 				Desc:        item.Desc,
 				Status:      PlanStepStatus(item.Status),
-				UpdatedAt:   item.UpdatedAtMs,
+				UpdatedAt:   item.UpdatedAt.UnixMilli(),
 			})
 		}
 		for _, item := range projection.AgentTasks {
 			out.AgentTasks = append(out.AgentTasks, AgentTask{
-				ID:          item.ID,
+				ID:          strconv.FormatUint(uint64(item.ID), 10),
 				WorkspaceID: item.WorkspaceID,
 				RunID:       item.RunID,
 				PlanID:      item.PlanID,
@@ -192,7 +185,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 				SubAgent:    item.SubAgent,
 				Goal:        item.Goal,
 				Status:      PlanStepStatus(item.Status),
-				UpdatedAt:   item.UpdatedAtMs,
+				UpdatedAt:   item.UpdatedAt.UnixMilli(),
 			})
 		}
 		for _, item := range projection.Results {
@@ -200,7 +193,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 				TaskID:    item.TaskID,
 				Summary:   item.Summary,
 				IsSuccess: item.IsSuccess,
-				UpdatedAt: item.UpdatedAtMs,
+				UpdatedAt: item.UpdatedAt.UnixMilli(),
 			})
 		}
 		if projection.Balance != nil {
@@ -236,7 +229,6 @@ func (d *ExplorationDomain) persistIntervention(workspaceID string, req Interven
 		return
 	}
 	event := &dbdao.InterventionEvent{
-		ID:          fmt.Sprintf("intervention-%s-%d", workspaceID, time.Now().UnixNano()),
 		WorkspaceID: workspaceID,
 		Type:        string(req.Type),
 		TargetID:    req.TargetID,
@@ -267,12 +259,10 @@ func (d *ExplorationDomain) persistMutations(mutations []MutationEvent) {
 			continue
 		}
 		log := dbdao.MutationLog{
-			ID:          mutation.ID,
 			WorkspaceID: mutation.WorkspaceID,
 			Kind:        mutation.Kind,
 			Source:      mutation.Source,
 			Payload:     string(raw),
-			CreatedAt:   time.UnixMilli(mutation.CreatedAt),
 		}
 		logs = append(logs, log)
 	}
@@ -381,7 +371,7 @@ func (d *ExplorationDomain) replayMutations(workspaceID string, cursor string, l
 	}
 	if hasMore && len(logs) > 0 {
 		last := logs[len(logs)-1]
-		page.NextCursor = buildCursor(last.CreatedAt, last.ID)
+		page.NextCursor = buildCursor(last.CreatedAt, strconv.FormatUint(uint64(last.ID), 10))
 	}
 	return page, nil
 }
@@ -422,23 +412,19 @@ func (d *ExplorationDomain) persistV1Intervention(view InterventionView) {
 	}
 	// Snapshot record keeps the latest lifecycle state for fast point-read.
 	snapshot := &dbdao.InterventionEvent{
-		ID:          view.ID,
 		WorkspaceID: view.WorkspaceID,
 		Type:        "v1_intervention_snapshot",
-		TargetID:    string(view.Status),
+		TargetID:    view.ID,
 		Note:        string(raw),
-		CreatedAt:   time.Now(),
 	}
 	_ = d.DB.UpsertInterventionEvent(snapshot)
 
 	// History record appends each lifecycle change for replay/audit.
 	history := &dbdao.InterventionEvent{
-		ID:          fmt.Sprintf("%s#%d", view.ID, time.Now().UnixNano()),
 		WorkspaceID: view.WorkspaceID,
 		Type:        "v1_intervention_lifecycle_event",
-		TargetID:    string(view.Status),
+		TargetID:    view.ID,
 		Note:        string(raw),
-		CreatedAt:   time.Now(),
 	}
 	_ = d.DB.CreateInterventionEvent(history)
 }

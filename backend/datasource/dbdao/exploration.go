@@ -71,7 +71,7 @@ type RuntimeBalanceRecord struct {
 	Research           float64   `json:"research"`
 	Aggression         float64   `json:"aggression"`
 	Reason             string    `json:"reason"`
-	UpdatedAtMs        int64     `json:"updated_at_ms"`
+	UpdatedAtMs        int64     `json:"updated_at"`
 	LatestReplanReason string    `json:"latest_replan_reason"`
 }
 
@@ -159,7 +159,7 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID string) (*RuntimeStatePr
 	var plans []RuntimePlanRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).
-		Order("created_at_ms asc, id asc").
+		Order("created_at asc, id asc").
 		Find(&plans).Error; err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID string) (*RuntimeStatePr
 	var steps []RuntimePlanStepRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).
-		Order("updated_at_ms asc, step_index asc, id asc").
+		Order("updated_at asc, step_index asc, id asc").
 		Find(&steps).Error; err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID string) (*RuntimeStatePr
 	var tasks []RuntimeAgentTaskRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).
-		Order("updated_at_ms asc, id asc").
+		Order("updated_at asc, id asc").
 		Find(&tasks).Error; err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID string) (*RuntimeStatePr
 	var results []RuntimeTaskResultRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).
-		Order("updated_at_ms asc, task_id asc").
+		Order("updated_at asc, task_id asc").
 		Find(&results).Error; err != nil {
 		return nil, err
 	}

@@ -35,9 +35,9 @@ describe('workbench domain helpers', () => {
       activeOpportunityId: target!.id,
     })
 
-    expect(view.activeOpportunity.id).toBe(target!.id)
-    expect(view.questionTrail.length).toBeGreaterThan(0)
-    expect(view.ideaCards.length).toBeGreaterThan(0)
+    expect(view!.activeOpportunity.id).toBe(target!.id)
+    expect(view!.questionTrail.length).toBeGreaterThan(0)
+    expect(view!.ideaCards.length).toBeGreaterThan(0)
   })
 
   it('expands an opportunity branch with additional ideas', () => {
@@ -51,7 +51,7 @@ describe('workbench domain helpers', () => {
     const expanded = expandOpportunity(session, session.activeOpportunityId)
     const nextView = buildWorkbenchView(expanded)
 
-    expect(nextView.ideaCards.length).toBeGreaterThan(initialView.ideaCards.length)
+    expect(nextView!.ideaCards.length).toBeGreaterThan(initialView!.ideaCards.length)
     expect(expanded.runs.at(-1)?.focus).toContain(session.activeOpportunityId)
   })
 
@@ -62,7 +62,7 @@ describe('workbench domain helpers', () => {
       constraints: 'low-cost, testable',
     })
 
-    const ideaId = buildWorkbenchView(session).ideaCards[0].id
+    const ideaId = buildWorkbenchView(session)!.ideaCards[0].id
 
     const saved = toggleFavoriteIdea(session, ideaId)
     expect(saved.favorites).toContain(ideaId)

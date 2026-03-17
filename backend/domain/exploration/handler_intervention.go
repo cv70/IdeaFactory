@@ -241,7 +241,7 @@ func decodeInterventionEventView(event dbdao.InterventionEvent) (InterventionEve
 		createdAt = event.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	return InterventionEventView{
-		ID:             event.ID,
+		ID:             strconv.FormatUint(uint64(event.ID), 10),
 		InterventionID: snapshot.ID,
 		WorkspaceID:    snapshot.WorkspaceID,
 		Status:         snapshot.Status,
