@@ -23,17 +23,12 @@ import {
 import { applyExplorationMutations } from './lib/mutations'
 import { buildWorkbenchView } from './lib/workbench'
 import type { ExplorationMutation, ExplorationSession, Node, RuntimeStrategy } from './types/exploration'
+import type { WorkspaceRecord } from './types/workspace'
 
 type StrategyHistoryEntry = {
   id: string
   createdAt: number
   strategy: RuntimeStrategy
-}
-
-type WorkspaceRecord = {
-  id: string
-  topic: string
-  updatedAt: number
 }
 
 const WORKSPACE_HISTORY_KEY = 'idea-factory.workspace-history.v1'
