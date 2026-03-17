@@ -5,9 +5,11 @@ import {
 import {
   ReactFlow, ReactFlowProvider,
   useNodesState, useEdgesState, useReactFlow,
+  useInternalNode,
+  getBezierPath, BaseEdge,
   Background, Controls, MiniMap,
   Handle, Position,
-  type NodeProps,
+  type NodeProps, type EdgeProps,
 } from '@xyflow/react'
 import type { Node as RFNode, Edge as RFEdge } from '@xyflow/react'
 import type { Node as ExplorationNode, Edge as ExplorationEdge, ExplorationSession } from '../types/exploration'
@@ -121,6 +123,38 @@ function IdeaNode({ data, selected }: NodeProps<IdeaNodeType>) {
 
 const nodeTypes = { ideaNode: IdeaNode }
 
+function FloatingEdge({ id, source, target, markerEnd, style }: EdgeProps) {
+  const sourceNode = useInternalNode(source)
+  const targetNode = useInternalNode(target)
+
+  if (!sourceNode || !targetNode) return null
+  if (!sourceNode.measured?.width || !targetNode.measured?.width) return null
+
+  const sr = nodeRadius(sourceNode.data?.type as string)
+  const tr = nodeRadius(targetNode.data?.type as string)
+  const scx = sourceNode.internals.positionAbsolute.x + sourceNode.measured.width / 2
+  const scy = sourceNode.internals.positionAbsolute.y + sr
+  const tcx = targetNode.internals.positionAbsolute.x + targetNode.measured.width / 2
+  const tcy = targetNode.internals.positionAbsolute.y + tr
+
+  const pts = circleBoundaryPoints(scx, scy, sr, tcx, tcy, tr)
+  if (!pts) return null
+
+  const [edgePath] = getBezierPath({
+    sourceX: pts.sx,
+    sourceY: pts.sy,
+    targetX: pts.tx,
+    targetY: pts.ty,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    curvature: 0.15,
+  })
+
+  return <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+}
+
+const edgeTypes = { floating: FloatingEdge }
+
 // ─── Node detail card ─────────────────────────────────────────────────────────
 
 type NodeDetailCardProps = {
@@ -197,8 +231,9 @@ function GraphCanvas({
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'floating',
           style: { stroke: 'rgba(23,42,92,0.15)', strokeWidth: 1.5 },
         }}
         onNodesChange={onNodesChange}
