@@ -60,6 +60,26 @@ export function nodeRadius(type: string): number {
   return nodeConfig(type).size / 2
 }
 
+type BoundaryPoints = { sx: number; sy: number; tx: number; ty: number }
+
+export function circleBoundaryPoints(
+  scx: number, scy: number, sr: number,
+  tcx: number, tcy: number, tr: number,
+): BoundaryPoints | null {
+  const dx = tcx - scx
+  const dy = tcy - scy
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist === 0) return null
+  const ux = dx / dist
+  const uy = dy / dist
+  return {
+    sx: scx + ux * sr,
+    sy: scy + uy * sr,
+    tx: tcx - ux * tr,
+    ty: tcy - uy * tr,
+  }
+}
+
 // ─── RF node / edge builders ──────────────────────────────────────────────────
 
 export function buildRFNode(node: ExplorationNode, entering: boolean): RFNode<RFNodeData, 'ideaNode'> {
