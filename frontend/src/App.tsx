@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
-import { AppHeader } from './components/AppHeader'
+import { LeftSidebar } from './components/LeftSidebar'
 import { LaunchPanel } from './components/LaunchPanel'
 import { SidebarPanel } from './components/SidebarPanel'
-import { WorkspaceManager } from './components/WorkspaceManager'
+import { WorkspaceHeader } from './components/WorkspaceHeader'
 import { GraphView } from './components/GraphView'
 import { LangContext, makeT } from './lib/i18n'
 import type { Lang } from './lib/i18n'
@@ -48,6 +48,8 @@ function App() {
   const [lastInterventionIntent, setLastInterventionIntent] = useState('')
   const [lastInterventionStatus, setLastInterventionStatus] = useState('')
   const [lang, setLang] = useState<Lang>('zh')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [viewMode, setViewMode] = useState<'launch' | 'workspace'>('launch')
 
   function toCursor(createdAt: number, id: string) {
     return `${createdAt}|${id}`
@@ -217,6 +219,7 @@ function App() {
     mutationCursorRef.current = ''
     setSelectedNodeId(response.data.exploration.activeOpportunityId)
     setLoading(false)
+    setViewMode('workspace')
   }
 
   async function handleExpandOpportunity(opportunity: Node) {
@@ -344,10 +347,12 @@ function App() {
       updatedAt: Date.now(),
     })
     setLoading(false)
+    setViewMode('workspace')
   }
 
   async function handleArchiveWorkspace(workspaceId: string) {
     setLoading(true)
+    setError('')
     const ok = await archiveWorkspace(workspaceId)
     if (!ok) {
       setError('Failed to archive workspace')
@@ -369,59 +374,70 @@ function App() {
       setExploration(null)
       setSelectedNodeId(null)
       setStrategyHistory([])
+      setViewMode('launch')
     }
     setLoading(false)
   }
-
-  useEffect(() => {
-    if (exploration || workspaceHistory.length === 0) return
-    const latest = workspaceHistory[0]
-    void handleSelectWorkspace(latest.id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceHistory, exploration])
 
   function handleExampleSelect(example: string) {
     setTopic(example)
   }
 
+  function handleNewExploration() {
+    setViewMode('launch')
+    setSidebarCollapsed(false)
+    setError('')
+  }
+
   return (
     <LangContext.Provider value={{ lang, setLang, t: makeT(lang) }}>
       <div className="appShell">
-      <AppHeader />
+        <LeftSidebar
+          workspaces={workspaceHistory}
+          activeWorkspaceId={exploration?.id}
+          collapsed={sidebarCollapsed}
+          loading={loading}
+          lang={lang}
+          onNewExploration={handleNewExploration}
+          onSelectWorkspace={handleSelectWorkspace}
+          onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
+          onSetLang={setLang}
+        />
 
-      <main className="appGrid">
-        <div className="mainColumn">
-          <LaunchPanel
-            topic={topic}
-            outputGoal={outputGoal}
-            constraints={constraints}
-            loading={loading}
-            examples={EXAMPLE_TOPICS}
-            onTopicChange={setTopic}
-            onOutputGoalChange={setOutputGoal}
-            onConstraintsChange={setConstraints}
-            onExampleSelect={handleExampleSelect}
-            onSubmit={handleSubmit}
-          />
-          <WorkspaceManager
-            workspaces={workspaceHistory}
-            activeWorkspaceId={exploration?.id}
-            loading={loading}
-            onSelectWorkspace={handleSelectWorkspace}
-            onArchiveWorkspace={handleArchiveWorkspace}
-          />
-
-          {error ? <p className="errorBanner">{error}</p> : null}
-
-          {exploration ? (
-            <GraphView
-              session={exploration}
-              selectedNodeId={selectedNodeId}
-              onSelectNode={(node) => setSelectedNodeId(node?.id ?? null)}
-              onExpandOpportunity={handleExpandOpportunity}
-            />
-          ) : null}
-        </div>
+        <main className="mainContent">
+          {viewMode === 'launch' ? (
+            <div className="launchCentered">
+              <LaunchPanel
+                topic={topic}
+                outputGoal={outputGoal}
+                constraints={constraints}
+                loading={loading}
+                examples={EXAMPLE_TOPICS}
+                onTopicChange={setTopic}
+                onOutputGoalChange={setOutputGoal}
+                onConstraintsChange={setConstraints}
+                onExampleSelect={handleExampleSelect}
+                onSubmit={handleSubmit}
+              />
+              {error ? <p className="errorBanner">{error}</p> : null}
+            </div>
+          ) : (
+            <>
+              <WorkspaceHeader
+                topic={exploration?.topic ?? ''}
+                loading={loading}
+                error={error || undefined}
+                onArchive={() => exploration && void handleArchiveWorkspace(exploration.id)}
+              />
+              <GraphView
+                session={exploration!}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={(node) => setSelectedNodeId(node?.id ?? null)}
+                onExpandOpportunity={handleExpandOpportunity}
+              />
+            </>
+          )}
+        </main>
 
         {view ? (
           <SidebarPanel
@@ -438,7 +454,6 @@ function App() {
             lastInterventionStatus={lastInterventionStatus}
           />
         ) : null}
-      </main>
       </div>
     </LangContext.Provider>
   )
