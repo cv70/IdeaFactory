@@ -200,7 +200,6 @@ export type I18nContext = {
   t: (key: TranslationKey) => string
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const LangContext = createContext<I18nContext>({
   lang: 'en',
   setLang: () => {},
