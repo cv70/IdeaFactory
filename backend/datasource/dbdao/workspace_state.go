@@ -20,6 +20,15 @@ type WorkspaceState struct {
 }
 
 func (d *DB) UpsertWorkspaceState(state *WorkspaceState) error {
+	var existing WorkspaceState
+	err := d.DB().Where("workspace_id = ?", state.WorkspaceID).First(&existing).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return d.DB().Create(state).Error
+		}
+		return err
+	}
+	state.ID = existing.ID
 	return d.DB().Save(state).Error
 }
 

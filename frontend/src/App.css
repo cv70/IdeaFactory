@@ -663,6 +663,8 @@ select:focus-visible {
   align-items: center;
   gap: 0.55rem;
   padding: 0.5rem 0.6rem;
+  min-height: 40px;
+  flex-shrink: 0;
   border-radius: 8px;
   border: none;
   background: transparent;

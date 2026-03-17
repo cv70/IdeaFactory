@@ -17,6 +17,42 @@ describe('idea factory app', () => {
     expect(screen.getByRole('button', { name: '开始探索' })).toBeInTheDocument()
   })
 
+  it('does not load local workspace cache when remote workspace list is empty', async () => {
+    window.localStorage.setItem(
+      'idea-factory.workspace-history.v1',
+      JSON.stringify([
+        { id: 'ws-test-1', topic: 'test topic', updatedAt: 1700000000000 },
+        { id: 'ws-test-2', topic: 'test', updatedAt: 1700000001000 },
+      ]),
+    )
+    vi.spyOn(explorationApi, 'listWorkspaces').mockResolvedValueOnce({ workspaces: [] })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(explorationApi.listWorkspaces).toHaveBeenCalled()
+    })
+    expect(screen.queryByText('test topic')).not.toBeInTheDocument()
+    expect(screen.queryByText('test')).not.toBeInTheDocument()
+  })
+
+  it('deduplicates invalid or repeated workspace records from remote list', async () => {
+    vi.spyOn(explorationApi, 'listWorkspaces').mockResolvedValueOnce({
+      workspaces: [
+        { id: 'ws-1', topic: 'AI education', output_goal: 'A', updated_at: 1 },
+        { id: 'ws-1', topic: 'AI education', output_goal: 'B', updated_at: 2 },
+        { id: '', topic: 'AI education', output_goal: 'C', updated_at: 3 },
+      ],
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(explorationApi.listWorkspaces).toHaveBeenCalled()
+    })
+    expect(screen.getAllByRole('button', { name: 'Open workspace AI education' })).toHaveLength(1)
+  })
+
   it('renders the workbench after submitting a topic', async () => {
     render(<App />)
 
@@ -101,6 +137,26 @@ describe('idea factory app', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Learning friction for AI education/).length).toBeGreaterThan(0)
     })
+  })
+
+  it('recovers from malformed workspace payload without leaving sidebar disabled', async () => {
+    vi.spyOn(explorationApi, 'listWorkspaces').mockResolvedValueOnce({
+      workspaces: [
+        { id: 'ws-bad', topic: 'AI education', output_goal: 'A', updated_at: 1 },
+      ],
+    })
+    vi.spyOn(explorationApi, 'getExploration').mockResolvedValueOnce({
+      code: 200,
+      data: {} as never,
+    })
+
+    render(<App />)
+
+    const workspaceButton = await screen.findByRole('button', { name: 'Open workspace AI education' })
+    fireEvent.click(workspaceButton)
+
+    expect(await screen.findByText('Failed to load workspace')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open workspace AI education' })).not.toBeDisabled()
   })
 
   it('archives active workspace from workspace header', async () => {

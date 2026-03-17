@@ -33,6 +33,23 @@ type StrategyHistoryEntry = {
 
 const WORKSPACE_HISTORY_KEY = 'idea-factory.workspace-history.v1'
 
+function normalizeWorkspaceHistory(records: WorkspaceRecord[]): WorkspaceRecord[] {
+  const seen = new Set<string>()
+  const normalized: WorkspaceRecord[] = []
+  for (const record of records) {
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    const topic = typeof record.topic === 'string' ? record.topic.trim() : ''
+    if (!id || !topic || seen.has(id)) continue
+    seen.add(id)
+    normalized.push({
+      id,
+      topic,
+      updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : Date.now(),
+    })
+  }
+  return normalized.slice(0, 30)
+}
+
 function App() {
   const [topic, setTopic] = useState('')
   const [outputGoal, setOutputGoal] = useState('')
@@ -92,12 +109,12 @@ function App() {
   useEffect(() => {
     void (async () => {
       const remote = await listWorkspaces(30)
-      if (remote && remote.workspaces.length > 0) {
-        const parsed = remote.workspaces.map((workspace) => ({
+      if (remote) {
+        const parsed = normalizeWorkspaceHistory(remote.workspaces.map((workspace) => ({
           id: workspace.id,
           topic: workspace.topic,
           updatedAt: workspace.updated_at,
-        }))
+        })))
         setWorkspaceHistory(parsed)
         try {
           localStorage.setItem(WORKSPACE_HISTORY_KEY, JSON.stringify(parsed))
@@ -110,9 +127,10 @@ function App() {
       try {
         const raw = localStorage.getItem(WORKSPACE_HISTORY_KEY)
         if (!raw) return
-        const parsed = JSON.parse(raw) as WorkspaceRecord[]
+        const parsed = JSON.parse(raw) as unknown
         if (!Array.isArray(parsed)) return
-        setWorkspaceHistory(parsed)
+        const normalized = normalizeWorkspaceHistory(parsed as WorkspaceRecord[])
+        setWorkspaceHistory(normalized)
       } catch {
         // Ignore invalid history payload.
       }
@@ -121,10 +139,10 @@ function App() {
 
   function upsertWorkspaceHistory(record: WorkspaceRecord) {
     setWorkspaceHistory((current) => {
-      const next = [
+      const next = normalizeWorkspaceHistory([
         record,
         ...current.filter((workspace) => workspace.id !== record.id),
-      ].slice(0, 30)
+      ])
       try {
         localStorage.setItem(WORKSPACE_HISTORY_KEY, JSON.stringify(next))
       } catch {
@@ -331,23 +349,33 @@ function App() {
   async function handleSelectWorkspace(workspaceId: string) {
     setLoading(true)
     setError('')
+    try {
+      const response = await getExploration(workspaceId)
+      const loaded = response.data?.exploration
+      if (
+        response.code !== 200 ||
+        !loaded ||
+        typeof loaded.id !== 'string' ||
+        !loaded.id.trim() ||
+        typeof loaded.topic !== 'string'
+      ) {
+        setError(response.msg ?? 'Failed to load workspace')
+        return
+      }
 
-    const response = await getExploration(workspaceId)
-    if (response.code !== 200) {
-      setError(response.msg ?? 'Failed to load workspace')
+      setExploration(loaded)
+      setSelectedNodeId(loaded.activeOpportunityId)
+      upsertWorkspaceHistory({
+        id: loaded.id,
+        topic: loaded.topic,
+        updatedAt: Date.now(),
+      })
+      setViewMode('workspace')
+    } catch {
+      setError('Failed to load workspace')
+    } finally {
       setLoading(false)
-      return
     }
-
-    setExploration(response.data.exploration)
-    setSelectedNodeId(response.data.exploration.activeOpportunityId)
-    upsertWorkspaceHistory({
-      id: response.data.exploration.id,
-      topic: response.data.exploration.topic,
-      updatedAt: Date.now(),
-    })
-    setLoading(false)
-    setViewMode('workspace')
   }
 
   async function handleArchiveWorkspace(workspaceId: string) {
