@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"backend/datasource/dbdao"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,7 +22,7 @@ func (d *ExplorationDomain) ApiV1CreateWorkspace(c *gin.Context) {
 	if updated, ok := d.GetWorkspace(snapshot.Exploration.ID); ok {
 		snapshot = updated
 	}
-	c.JSON(http.StatusCreated, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration)})
+	c.JSON(http.StatusCreated, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration, nil)})
 }
 
 func (d *ExplorationDomain) ApiV1GetWorkspace(c *gin.Context) {
@@ -30,21 +32,29 @@ func (d *ExplorationDomain) ApiV1GetWorkspace(c *gin.Context) {
 		writeV1Error(c, http.StatusNotFound, "not_found", "workspace not found")
 		return
 	}
-	c.JSON(http.StatusOK, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration)})
+	var dbState *dbdao.WorkspaceState
+	if d.DB != nil {
+		dbState, _ = d.DB.GetWorkspaceState(workspaceID)
+	}
+	c.JSON(http.StatusOK, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration, dbState)})
 }
 
-func toWorkspaceView(session ExplorationSession) WorkspaceView {
+func toWorkspaceView(session ExplorationSession, dbState *dbdao.WorkspaceState) WorkspaceView {
 	constraints := []string{}
 	if strings.TrimSpace(session.Constraints) != "" {
 		constraints = append(constraints, session.Constraints)
 	}
 	nowISO := time.Now().UTC().Format(time.RFC3339)
+	status := WorkspaceStatusActive
+	if dbState != nil && dbState.PausedAt != nil {
+		status = WorkspaceStatusPaused
+	}
 	return WorkspaceView{
 		ID:          session.ID,
 		Topic:       session.Topic,
 		Goal:        session.OutputGoal,
 		Constraints: constraints,
-		Status:      WorkspaceStatusActive,
+		Status:      status,
 		CreatedAt:   nowISO,
 		UpdatedAt:   nowISO,
 	}
