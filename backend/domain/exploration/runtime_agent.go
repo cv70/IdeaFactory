@@ -776,6 +776,7 @@ func (d *ExplorationDomain) scheduleNextRun(workspaceID string) {
 
 	// Step 5: Launch scheduler goroutine (outside any lock).
 	go func() {
+		defer cancel()
 		select {
 		case <-time.After(time.Duration(intervalMs) * time.Millisecond):
 			// Re-check paused state to close the narrow race where a pause arrived
