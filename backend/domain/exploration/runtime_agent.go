@@ -723,3 +723,89 @@ func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, worksp
 	newNodes, newEdges := d.planner.GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
 	d.applyGeneratedNodes(workspaceID, newNodes, newEdges)
 }
+
+// scheduleNextRun inspects workspace state and, if scheduling is warranted,
+// launches a goroutine that will call triggerRun after IntervalMs delay.
+// It returns immediately (non-blocking). Never call with runtime.mu or store.mu held.
+func (d *ExplorationDomain) scheduleNextRun(workspaceID string) {
+	// Step 1: DB paused check (outside any lock).
+	if d.DB != nil {
+		dbState, err := d.DB.GetWorkspaceState(workspaceID)
+		if err == nil && dbState != nil && dbState.PausedAt != nil {
+			return
+		}
+	}
+
+	// Step 2: Runtime guard checks (under runtime.mu).
+	var maxRuns, runCount int
+	var agentRunning bool
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		agentRunning = s.AgentRunning
+		runCount = len(s.Runs)
+	})
+	if agentRunning {
+		return
+	}
+
+	// Step 3: Read IntervalMs from session store (separate lock from runtime.mu).
+	var intervalMs int
+	d.store.mu.RLock()
+	if session, ok := d.store.workspaces[workspaceID]; ok {
+		maxRuns = session.Strategy.MaxRuns
+		intervalMs = session.Strategy.IntervalMs
+	}
+	d.store.mu.RUnlock()
+
+	if maxRuns > 0 && runCount >= maxRuns {
+		return
+	}
+
+	if intervalMs < 0 {
+		intervalMs = 0
+	}
+
+	// Step 4: Store cancel func (under runtime.mu).
+	ctx, cancel := context.WithCancel(context.Background())
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		// If a scheduler is already waiting, cancel it first.
+		if s.cancelScheduler != nil {
+			s.cancelScheduler()
+		}
+		s.cancelScheduler = cancel
+	})
+
+	// Step 5: Launch scheduler goroutine (outside any lock).
+	go func() {
+		select {
+		case <-time.After(time.Duration(intervalMs) * time.Millisecond):
+			// Re-check paused state to close the narrow race where a pause arrived
+			// after the DB check above but before the context was stored.
+			if d.DB != nil {
+				dbState, err := d.DB.GetWorkspaceState(workspaceID)
+				if err == nil && dbState != nil && dbState.PausedAt != nil {
+					d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+						s.cancelScheduler = nil
+					})
+					return
+				}
+			}
+			d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+				s.cancelScheduler = nil
+			})
+			d.triggerRun(ctx, workspaceID, "auto")
+		case <-ctx.Done():
+			// Cancelled by pauseScheduler — do nothing.
+		}
+	}()
+}
+
+// pauseScheduler cancels any pending scheduler goroutine for the workspace.
+// Does NOT interrupt a currently running runAgentCycle.
+func (d *ExplorationDomain) pauseScheduler(workspaceID string) {
+	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+		if s.cancelScheduler != nil {
+			s.cancelScheduler()
+			s.cancelScheduler = nil
+		}
+	})
+}

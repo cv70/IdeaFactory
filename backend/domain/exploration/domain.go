@@ -24,9 +24,10 @@ type RuntimeWorkspaceState struct {
 	Mutations     []MutationEvent
 	ReplanReason  string
 	Interventions map[string]InterventionView // keyed by intervention ID
-	Running       bool
-	AgentRunning  bool // true while runAgentCycle goroutine is active
-	Cursor        int
+	Running         bool
+	AgentRunning    bool // true while runAgentCycle goroutine is active
+	Cursor          int
+	cancelScheduler context.CancelFunc // non-nil while a scheduler goroutine is pending the next run
 }
 
 type workspaceStore struct {
