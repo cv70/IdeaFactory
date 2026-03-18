@@ -16,15 +16,15 @@ import (
 // RuntimeWorkspaceState holds all per-workspace runtime data.
 // Access exclusively via withWorkspaceState.
 type RuntimeWorkspaceState struct {
-	Runs          []Run
-	Plans         []ExecutionPlan
-	PlanSteps     []PlanStep
-	AgentTasks    []AgentTask
-	Results       []AgentTaskResultSummary
-	Balance       BalanceState
-	Mutations     []MutationEvent
-	ReplanReason  string
-	Interventions map[string]InterventionView // keyed by intervention ID
+	Runs            []Run
+	Plans           []ExecutionPlan
+	PlanSteps       []PlanStep
+	AgentTasks      []AgentTask
+	Results         []AgentTaskResultSummary
+	Balance         BalanceState
+	Mutations       []MutationEvent
+	ReplanReason    string
+	Interventions   map[string]InterventionView // keyed by intervention ID
 	Running         bool
 	AgentRunning    bool // true while runAgentCycle goroutine is active
 	Cursor          int
@@ -135,7 +135,7 @@ func (d *ExplorationDomain) Start(ctx context.Context) error {
 		return fmt.Errorf("Start: list active workspaces: %w", err)
 	}
 	for _, state := range states {
-		wsID := state.WorkspaceID
+		wsID := formatWorkspaceID(state.ID)
 		session, ok := d.loadWorkspace(wsID)
 		if !ok || session == nil {
 			continue

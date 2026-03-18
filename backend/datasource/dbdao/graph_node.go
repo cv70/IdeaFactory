@@ -28,14 +28,19 @@ const (
 // GraphNode represents a node in the exploration graph
 type GraphNode struct {
 	gorm.Model
-	WorkspaceID string   `json:"workspace_id" gorm:"index"`
+	WorkspaceID uint     `json:"workspace_id" gorm:"index"`
 	SessionID   string   `json:"session_id" gorm:"index"`
+	NodeID      string   `json:"node_id" gorm:"index"`
 	Type        NodeType `json:"node_type"`
 	Title       string   `json:"title"`
 	Summary     string   `json:"summary"`
 	Body        string   `json:"body"`
 	Status      Status   `json:"status"`
+	Score       float64  `json:"score"`
+	Depth       int      `json:"depth"`
 	Metadata    string   `json:"metadata"` // JSON string
+	Evidence    string   `json:"evidence" gorm:"type:text"`
+	Decision    string   `json:"decision" gorm:"type:text"`
 }
 
 func (d *DB) CreateNode(node *GraphNode) error {

@@ -733,9 +733,11 @@ func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, worksp
 func (d *ExplorationDomain) scheduleNextRun(workspaceID string) {
 	// Step 1: DB paused check (outside any lock).
 	if d.DB != nil {
-		dbState, err := d.DB.GetWorkspaceState(workspaceID)
-		if err == nil && dbState != nil && dbState.PausedAt != nil {
-			return
+		if workspaceDBID, parseErr := parseWorkspaceID(workspaceID); parseErr == nil {
+			dbState, err := d.DB.GetWorkspaceState(workspaceDBID)
+			if err == nil && dbState != nil && dbState.PausedAt != nil {
+				return
+			}
 		}
 	}
 
@@ -785,12 +787,14 @@ func (d *ExplorationDomain) scheduleNextRun(workspaceID string) {
 			// Re-check paused state to close the narrow race where a pause arrived
 			// after the DB check above but before the context was stored.
 			if d.DB != nil {
-				dbState, err := d.DB.GetWorkspaceState(workspaceID)
-				if err == nil && dbState != nil && dbState.PausedAt != nil {
-					d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
-						s.cancelScheduler = nil
-					})
-					return
+				if workspaceDBID, parseErr := parseWorkspaceID(workspaceID); parseErr == nil {
+					dbState, err := d.DB.GetWorkspaceState(workspaceDBID)
+					if err == nil && dbState != nil && dbState.PausedAt != nil {
+						d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
+							s.cancelScheduler = nil
+						})
+						return
+					}
 				}
 			}
 			d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {

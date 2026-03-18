@@ -25,7 +25,7 @@ func (d *ExplorationDomain) ListWorkspaces(limit int) ([]WorkspaceSummary, error
 	out := make([]WorkspaceSummary, 0, len(states))
 	for _, state := range states {
 		out = append(out, WorkspaceSummary{
-			ID:         state.WorkspaceID,
+			ID:         formatWorkspaceID(state.ID),
 			Topic:      state.Topic,
 			OutputGoal: state.OutputGoal,
 			UpdatedAt:  state.UpdatedAt.UnixMilli(),
@@ -49,7 +49,11 @@ func (d *ExplorationDomain) ArchiveWorkspace(workspaceID string) bool {
 	}
 
 	if d.DB != nil {
-		if err := d.DB.ArchiveWorkspaceState(workspaceID); err != nil {
+		workspaceDBID, err := parseWorkspaceID(workspaceID)
+		if err != nil {
+			return false
+		}
+		if err := d.DB.ArchiveWorkspaceState(workspaceDBID); err != nil {
 			return false
 		}
 	}

@@ -1,6 +1,7 @@
 package exploration
 
 import (
+	"backend/datasource/dbdao"
 	"fmt"
 	"slices"
 	"strings"
@@ -137,11 +138,10 @@ func makeEdge(from string, to string, edgeType EdgeType) Edge {
 	}
 }
 
-func createWorkspace(req CreateWorkspaceReq) ExplorationSession {
+func createWorkspace(workspaceID string, req CreateWorkspaceReq) ExplorationSession {
 	topic := strings.TrimSpace(req.Topic)
 	outputGoal := strings.TrimSpace(req.OutputGoal)
 	constraints := strings.TrimSpace(req.Constraints)
-	workspaceID := fmt.Sprintf("workspace-%s-%d", slugify(topic), time.Now().UnixMilli())
 
 	topicNode := makeNode(
 		workspaceID,
@@ -258,7 +258,19 @@ func filterNodesByType(nodes []Node, nodeType NodeType) []Node {
 }
 
 func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) (*WorkspaceSnapshot, error) {
-	session := createWorkspace(req)
+	workspaceID := fmt.Sprintf("workspace-%s-%d", slugify(strings.TrimSpace(req.Topic)), time.Now().UnixMilli())
+	if d.DB != nil {
+		state := &dbdao.WorkspaceState{
+			Topic:       strings.TrimSpace(req.Topic),
+			OutputGoal:  strings.TrimSpace(req.OutputGoal),
+			Constraints: strings.TrimSpace(req.Constraints),
+		}
+		if err := d.DB.UpsertWorkspaceState(state); err != nil {
+			return nil, err
+		}
+		workspaceID = formatWorkspaceID(state.ID)
+	}
+	session := createWorkspace(workspaceID, req)
 	d.store.mu.Lock()
 	d.store.workspaces[session.ID] = &session
 	d.store.mu.Unlock()
@@ -273,6 +285,11 @@ func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) (*WorkspaceS
 }
 
 func (d *ExplorationDomain) GetWorkspace(workspaceID string) (*WorkspaceSnapshot, bool) {
+	if d.DB != nil {
+		if workspaceDBID, err := parseWorkspaceID(workspaceID); err == nil {
+			workspaceID = formatWorkspaceID(workspaceDBID)
+		}
+	}
 	d.store.mu.RLock()
 	session, ok := d.store.workspaces[workspaceID]
 	d.store.mu.RUnlock()

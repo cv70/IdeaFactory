@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1375,7 +1376,11 @@ func TestPatchWorkspaceResume(t *testing.T) {
 
 	// Pause first (if DB is present)
 	if domain.DB != nil {
-		if err := domain.DB.PauseWorkspaceState(wsID); err != nil {
+		id, err := strconv.ParseUint(wsID, 10, 64)
+		if err != nil {
+			t.Fatalf("parse workspace id: %v", err)
+		}
+		if err := domain.DB.PauseWorkspaceState(uint(id)); err != nil {
 			t.Fatalf("pause: %v", err)
 		}
 	}
@@ -1395,6 +1400,56 @@ func TestPatchWorkspaceResume(t *testing.T) {
 	}
 	if patchResp.Workspace.Status != WorkspaceStatusActive {
 		t.Fatalf("expected active, got %s", patchResp.Workspace.Status)
+	}
+}
+
+func TestV1GetWorkspaceRejectsNonNumericID(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/not-a-number", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for non-numeric workspaceID, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestLegacyGetWorkspaceRejectsNonNumericID(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/exploration/workspaces/not-a-number", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected transport status 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp testResp[map[string]any]
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected business code 400 for non-numeric workspaceID, got %d body=%s", resp.Code, w.Body.String())
+	}
+}
+
+func TestLegacyGetRuntimeRejectsNonNumericID(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/exploration/workspaces/not-a-number/runtime", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected transport status 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp testResp[map[string]any]
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected business code 400 for non-numeric workspaceID, got %d body=%s", resp.Code, w.Body.String())
 	}
 }
 

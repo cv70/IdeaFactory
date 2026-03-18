@@ -7,47 +7,178 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func (d *ExplorationDomain) persistWorkspace(session ExplorationSession) error {
-	raw, err := json.Marshal(session)
+	if d.DB == nil {
+		return nil
+	}
+	workspaceID, err := parseWorkspaceID(session.ID)
+	if err != nil {
+		return err
+	}
+
+	strategyRaw, err := json.Marshal(session.Strategy)
+	if err != nil {
+		return err
+	}
+	favoritesRaw, err := json.Marshal(session.Favorites)
+	if err != nil {
+		return err
+	}
+	runsRaw, err := json.Marshal(session.Runs)
 	if err != nil {
 		return err
 	}
 
 	state := &dbdao.WorkspaceState{
-		WorkspaceID:         session.ID,
+		Model:               gorm.Model{ID: workspaceID},
 		Topic:               session.Topic,
 		OutputGoal:          session.OutputGoal,
 		Constraints:         session.Constraints,
+		Strategy:            string(strategyRaw),
+		Favorites:           string(favoritesRaw),
+		RunNotes:            string(runsRaw),
 		ActiveOpportunityID: session.ActiveOpportunityID,
 		LastRunRound:        len(session.Runs),
-		Snapshot:            string(raw),
 	}
-	// Preserve PausedAt and ArchivedAt — these are managed by PauseWorkspaceState /
-	// ArchiveWorkspaceState and must not be clobbered by a full Save().
-	if existing, err2 := d.DB.GetWorkspaceState(session.ID); err2 == nil && existing != nil {
+	// Preserve lifecycle fields that are managed via dedicated APIs.
+	if existing, err2 := d.DB.GetWorkspaceState(workspaceID); err2 == nil && existing != nil {
+		state.CreatedAt = existing.CreatedAt
 		state.PausedAt = existing.PausedAt
 		state.ArchivedAt = existing.ArchivedAt
 	}
-	err = d.DB.UpsertWorkspaceState(state)
-	if err != nil {
+	if err := d.DB.UpsertWorkspaceState(state); err != nil {
 		return err
 	}
-	return nil
+
+	nodes := make([]dbdao.GraphNode, 0, len(session.Nodes))
+	for _, node := range session.Nodes {
+		metaRaw, _ := json.Marshal(node.Metadata)
+		decisionRaw := ""
+		if node.Decision != nil {
+			decisionBytes, _ := json.Marshal(node.Decision)
+			decisionRaw = string(decisionBytes)
+		}
+		nodes = append(nodes, dbdao.GraphNode{
+			WorkspaceID: workspaceID,
+			SessionID:   session.ID,
+			NodeID:      node.ID,
+			Type:        dbdao.NodeType(node.Type),
+			Title:       node.Title,
+			Summary:     node.Summary,
+			Body:        node.ParentContext,
+			Status:      dbdao.Status(node.Status),
+			Score:       node.Score,
+			Depth:       node.Depth,
+			Metadata:    string(metaRaw),
+			Evidence:    node.EvidenceSummary,
+			Decision:    decisionRaw,
+		})
+	}
+	edges := make([]dbdao.GraphEdge, 0, len(session.Edges))
+	for _, edge := range session.Edges {
+		edges = append(edges, dbdao.GraphEdge{
+			WorkspaceID: workspaceID,
+			SessionID:   session.ID,
+			FromID:      edge.From,
+			ToID:        edge.To,
+			Type:        dbdao.EdgeType(edge.Type),
+		})
+	}
+	return d.DB.ReplaceWorkspaceGraph(workspaceID, nodes, edges)
 }
 
 func (d *ExplorationDomain) loadWorkspace(workspaceID string) (*ExplorationSession, bool) {
 	if d.DB == nil {
 		return nil, false
 	}
-	state, err := d.DB.GetWorkspaceState(workspaceID)
+	workspaceDBID, err := parseWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, false
+	}
+	workspaceID = formatWorkspaceID(workspaceDBID)
+	state, err := d.DB.GetWorkspaceState(workspaceDBID)
 	if err != nil || state == nil {
 		return nil, false
 	}
-	var session ExplorationSession
-	if err := json.Unmarshal([]byte(state.Snapshot), &session); err != nil {
+	nodes, edges, err := d.DB.GetWorkspaceGraph(workspaceDBID)
+	if err != nil {
 		return nil, false
+	}
+
+	var strategy RuntimeStrategy
+	if strings.TrimSpace(state.Strategy) != "" {
+		if err := json.Unmarshal([]byte(state.Strategy), &strategy); err != nil {
+			return nil, false
+		}
+	}
+	favorites := []string{}
+	if strings.TrimSpace(state.Favorites) != "" {
+		if err := json.Unmarshal([]byte(state.Favorites), &favorites); err != nil {
+			return nil, false
+		}
+	}
+	runNotes := []GenerationRun{}
+	if strings.TrimSpace(state.RunNotes) != "" {
+		if err := json.Unmarshal([]byte(state.RunNotes), &runNotes); err != nil {
+			return nil, false
+		}
+	}
+
+	outNodes := make([]Node, 0, len(nodes))
+	for _, item := range nodes {
+		var metadata NodeMetadata
+		if strings.TrimSpace(item.Metadata) != "" {
+			_ = json.Unmarshal([]byte(item.Metadata), &metadata)
+		}
+		var decision *Decision
+		if strings.TrimSpace(item.Decision) != "" {
+			var parsed Decision
+			if err := json.Unmarshal([]byte(item.Decision), &parsed); err == nil {
+				decision = &parsed
+			}
+		}
+		outNodes = append(outNodes, Node{
+			ID:              item.NodeID,
+			WorkspaceID:     workspaceID,
+			SessionID:       item.SessionID,
+			Type:            NodeType(item.Type),
+			Title:           item.Title,
+			Summary:         item.Summary,
+			Status:          NodeStatus(item.Status),
+			Score:           item.Score,
+			Depth:           item.Depth,
+			ParentContext:   item.Body,
+			Metadata:        metadata,
+			EvidenceSummary: item.Evidence,
+			Decision:        decision,
+		})
+	}
+	outEdges := make([]Edge, 0, len(edges))
+	for _, item := range edges {
+		outEdges = append(outEdges, Edge{
+			ID:          strconv.FormatUint(uint64(item.ID), 10),
+			WorkspaceID: workspaceID,
+			From:        item.FromID,
+			To:          item.ToID,
+			Type:        EdgeType(item.Type),
+		})
+	}
+
+	session := ExplorationSession{
+		ID:                  workspaceID,
+		Topic:               state.Topic,
+		OutputGoal:          state.OutputGoal,
+		Constraints:         state.Constraints,
+		Strategy:            strategy,
+		ActiveOpportunityID: state.ActiveOpportunityID,
+		Nodes:               outNodes,
+		Edges:               outEdges,
+		Favorites:           favorites,
+		Runs:                runNotes,
 	}
 	return &session, true
 }
@@ -56,21 +187,17 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	if d.DB == nil {
 		return
 	}
+	workspaceDBID, err := parseWorkspaceID(workspaceID)
+	if err != nil {
+		return
+	}
 	snapshot, ok := d.GetRuntimeState(workspaceID)
 	if !ok {
 		return
 	}
-	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		return
-	}
-	_ = d.DB.UpsertWorkspaceRuntimeState(&dbdao.WorkspaceRuntimeState{
-		WorkspaceID: workspaceID,
-		Snapshot:    string(raw),
-	})
 
 	projection := dbdao.RuntimeStateProjection{
-		WorkspaceID: workspaceID,
+		WorkspaceID: workspaceDBID,
 		Runs:        make([]dbdao.RuntimeRunRecord, 0, len(snapshot.Runs)),
 		Plans:       make([]dbdao.RuntimePlanRecord, 0, len(snapshot.Plans)),
 		PlanSteps:   make([]dbdao.RuntimePlanStepRecord, 0, len(snapshot.PlanSteps)),
@@ -78,8 +205,12 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 		Results:     make([]dbdao.RuntimeTaskResultRecord, 0, len(snapshot.Results)),
 	}
 	for _, item := range snapshot.Runs {
+		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
+		if err != nil {
+			itemWorkspaceID = workspaceDBID
+		}
 		projection.Runs = append(projection.Runs, dbdao.RuntimeRunRecord{
-			WorkspaceID: item.WorkspaceID,
+			WorkspaceID: itemWorkspaceID,
 			Source:      item.Source,
 			Status:      string(item.Status),
 			StartedAt:   item.StartedAt,
@@ -87,15 +218,23 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 		})
 	}
 	for _, item := range snapshot.Plans {
+		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
+		if err != nil {
+			itemWorkspaceID = workspaceDBID
+		}
 		projection.Plans = append(projection.Plans, dbdao.RuntimePlanRecord{
-			WorkspaceID: item.WorkspaceID,
+			WorkspaceID: itemWorkspaceID,
 			RunID:       item.RunID,
 			Version:     item.Version,
 		})
 	}
 	for _, item := range snapshot.PlanSteps {
+		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
+		if err != nil {
+			itemWorkspaceID = workspaceDBID
+		}
 		projection.PlanSteps = append(projection.PlanSteps, dbdao.RuntimePlanStepRecord{
-			WorkspaceID: item.WorkspaceID,
+			WorkspaceID: itemWorkspaceID,
 			RunID:       item.RunID,
 			PlanID:      item.PlanID,
 			StepIndex:   item.Index,
@@ -104,8 +243,12 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 		})
 	}
 	for _, item := range snapshot.AgentTasks {
+		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
+		if err != nil {
+			itemWorkspaceID = workspaceDBID
+		}
 		projection.AgentTasks = append(projection.AgentTasks, dbdao.RuntimeAgentTaskRecord{
-			WorkspaceID: item.WorkspaceID,
+			WorkspaceID: itemWorkspaceID,
 			RunID:       item.RunID,
 			PlanID:      item.PlanID,
 			PlanStepID:  item.PlanStepID,
@@ -117,14 +260,18 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	for _, item := range snapshot.Results {
 		projection.Results = append(projection.Results, dbdao.RuntimeTaskResultRecord{
 			TaskID:      item.TaskID,
-			WorkspaceID: workspaceID,
+			WorkspaceID: workspaceDBID,
 			Summary:     item.Summary,
 			IsSuccess:   item.IsSuccess,
 		})
 	}
 	if snapshot.Balance.WorkspaceID != "" {
+		balanceWorkspaceID, err := parseWorkspaceID(snapshot.Balance.WorkspaceID)
+		if err != nil {
+			balanceWorkspaceID = workspaceDBID
+		}
 		projection.Balance = &dbdao.RuntimeBalanceRecord{
-			WorkspaceID:        snapshot.Balance.WorkspaceID,
+			WorkspaceID:        balanceWorkspaceID,
 			RunID:              snapshot.Balance.RunID,
 			Divergence:         snapshot.Balance.Divergence,
 			Research:           snapshot.Balance.Research,
@@ -141,7 +288,11 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 	if d.DB == nil {
 		return RuntimeStateSnapshot{}, false
 	}
-	projection, err := d.DB.LoadWorkspaceRuntimeProjection(workspaceID)
+	workspaceDBID, err := parseWorkspaceID(workspaceID)
+	if err != nil {
+		return RuntimeStateSnapshot{}, false
+	}
+	projection, err := d.DB.LoadWorkspaceRuntimeProjection(workspaceDBID)
 	if err == nil && projection != nil && len(projection.Runs) > 0 {
 		out := RuntimeStateSnapshot{
 			Runs:               make([]Run, 0, len(projection.Runs)),
@@ -154,7 +305,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		for _, item := range projection.Runs {
 			out.Runs = append(out.Runs, Run{
 				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: item.WorkspaceID,
+				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
 				Source:      item.Source,
 				Status:      RunStatus(item.Status),
 				StartedAt:   item.StartedAt,
@@ -164,7 +315,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		for _, item := range projection.Plans {
 			out.Plans = append(out.Plans, ExecutionPlan{
 				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: item.WorkspaceID,
+				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
 				RunID:       item.RunID,
 				Version:     item.Version,
 				CreatedAt:   item.CreatedAt.UnixMilli(),
@@ -173,7 +324,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		for _, item := range projection.PlanSteps {
 			out.PlanSteps = append(out.PlanSteps, PlanStep{
 				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: item.WorkspaceID,
+				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
 				RunID:       item.RunID,
 				PlanID:      item.PlanID,
 				Index:       item.StepIndex,
@@ -185,7 +336,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		for _, item := range projection.AgentTasks {
 			out.AgentTasks = append(out.AgentTasks, AgentTask{
 				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: item.WorkspaceID,
+				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
 				RunID:       item.RunID,
 				PlanID:      item.PlanID,
 				PlanStepID:  item.PlanStepID,
@@ -205,7 +356,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		}
 		if projection.Balance != nil {
 			out.Balance = BalanceState{
-				WorkspaceID: projection.Balance.WorkspaceID,
+				WorkspaceID: formatWorkspaceID(projection.Balance.WorkspaceID),
 				RunID:       projection.Balance.RunID,
 				Divergence:  projection.Balance.Divergence,
 				Research:    projection.Balance.Research,
@@ -216,19 +367,7 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		}
 		return out, true
 	}
-
-	state, err := d.DB.GetWorkspaceRuntimeState(workspaceID)
-	if err != nil || state == nil {
-		return RuntimeStateSnapshot{}, false
-	}
-	var snapshot RuntimeStateSnapshot
-	if err := json.Unmarshal([]byte(state.Snapshot), &snapshot); err != nil {
-		return RuntimeStateSnapshot{}, false
-	}
-	if len(snapshot.Runs) == 0 {
-		return RuntimeStateSnapshot{}, false
-	}
-	return snapshot, true
+	return RuntimeStateSnapshot{}, false
 }
 
 func (d *ExplorationDomain) persistIntervention(workspaceID string, req InterventionReq) {
@@ -401,7 +540,11 @@ func (d *ExplorationDomain) compactMutationLogs(workspaceID string, hardLimit in
 	}
 	_ = d.DB.DeleteMutationLogsBefore(workspaceID, cutoffLog.CreatedAt)
 
-	state, err := d.DB.GetWorkspaceState(workspaceID)
+	workspaceDBID, err := parseWorkspaceID(workspaceID)
+	if err != nil {
+		return
+	}
+	state, err := d.DB.GetWorkspaceState(workspaceDBID)
 	if err != nil || state == nil {
 		return
 	}

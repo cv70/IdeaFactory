@@ -8,34 +8,29 @@ import (
 
 type WorkspaceState struct {
 	gorm.Model
-	WorkspaceID         string     `json:"workspace_id"`
 	Topic               string     `json:"topic"`
 	OutputGoal          string     `json:"output_goal"`
 	Constraints         string     `json:"constraints"`
+	Strategy            string     `json:"strategy" gorm:"type:text"`
+	Favorites           string     `json:"favorites" gorm:"type:text"`
+	RunNotes            string     `json:"run_notes" gorm:"type:text"`
 	ActiveOpportunityID string     `json:"active_opportunity_id"`
 	LastRunRound        int        `json:"last_run_round"`
 	LastCompactedAt     time.Time  `json:"last_compacted_at"`
 	ArchivedAt          *time.Time `json:"archived_at" gorm:"index"`
 	PausedAt            *time.Time `json:"paused_at" gorm:"index"`
-	Snapshot            string     `json:"snapshot" gorm:"type:text"`
 }
 
 func (d *DB) UpsertWorkspaceState(state *WorkspaceState) error {
-	var existing WorkspaceState
-	err := d.DB().Where("workspace_id = ?", state.WorkspaceID).First(&existing).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return d.DB().Create(state).Error
-		}
-		return err
+	if state.ID == 0 {
+		return d.DB().Create(state).Error
 	}
-	state.ID = existing.ID
 	return d.DB().Save(state).Error
 }
 
-func (d *DB) GetWorkspaceState(workspaceID string) (*WorkspaceState, error) {
+func (d *DB) GetWorkspaceState(workspaceID uint) (*WorkspaceState, error) {
 	var state WorkspaceState
-	err := d.DB().Where("workspace_id = ?", workspaceID).First(&state).Error
+	err := d.DB().First(&state, workspaceID).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -60,26 +55,26 @@ func (d *DB) ListWorkspaceStates(limit int, includeArchived bool) ([]WorkspaceSt
 	return states, nil
 }
 
-func (d *DB) ArchiveWorkspaceState(workspaceID string) error {
+func (d *DB) ArchiveWorkspaceState(workspaceID uint) error {
 	now := time.Now()
 	return d.DB().
 		Model(&WorkspaceState{}).
-		Where("workspace_id = ?", workspaceID).
+		Where("id = ?", workspaceID).
 		Update("archived_at", &now).Error
 }
 
-func (d *DB) PauseWorkspaceState(workspaceID string) error {
+func (d *DB) PauseWorkspaceState(workspaceID uint) error {
 	now := time.Now()
 	return d.DB().
 		Model(&WorkspaceState{}).
-		Where("workspace_id = ?", workspaceID).
+		Where("id = ?", workspaceID).
 		Update("paused_at", &now).Error
 }
 
-func (d *DB) ResumeWorkspaceState(workspaceID string) error {
+func (d *DB) ResumeWorkspaceState(workspaceID uint) error {
 	return d.DB().
 		Model(&WorkspaceState{}).
-		Where("workspace_id = ?", workspaceID).
+		Where("id = ?", workspaceID).
 		Update("paused_at", gorm.Expr("NULL")).Error
 }
 

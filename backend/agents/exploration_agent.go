@@ -50,7 +50,7 @@ func NewExplorationAgent(ctx context.Context, cm model.ToolCallingChatModel) (ad
 			artifactAgent,
 			generalAgent,
 		},
-		MaxIteration: 6,
+		MaxIteration: 100,
 	})
 	return explorationAgent, err
 }

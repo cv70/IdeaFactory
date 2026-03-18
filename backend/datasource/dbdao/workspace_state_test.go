@@ -24,15 +24,17 @@ func newTestDB(t *testing.T) *DB {
 func TestPauseAndResumeWorkspaceState(t *testing.T) {
 	db := newTestDB(t)
 
-	if err := db.UpsertWorkspaceState(&WorkspaceState{WorkspaceID: "ws-pause-test", Topic: "t"}); err != nil {
+	state := &WorkspaceState{Topic: "t"}
+	if err := db.UpsertWorkspaceState(state); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
+	workspaceID := state.ID
 
 	// pause
-	if err := db.PauseWorkspaceState("ws-pause-test"); err != nil {
+	if err := db.PauseWorkspaceState(workspaceID); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	state, err := db.GetWorkspaceState("ws-pause-test")
+	state, err := db.GetWorkspaceState(workspaceID)
 	if err != nil || state == nil {
 		t.Fatalf("get after pause: %v", err)
 	}
@@ -41,10 +43,10 @@ func TestPauseAndResumeWorkspaceState(t *testing.T) {
 	}
 
 	// resume
-	if err := db.ResumeWorkspaceState("ws-pause-test"); err != nil {
+	if err := db.ResumeWorkspaceState(workspaceID); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	state, err = db.GetWorkspaceState("ws-pause-test")
+	state, err = db.GetWorkspaceState(workspaceID)
 	if err != nil || state == nil {
 		t.Fatalf("get after resume: %v", err)
 	}
@@ -56,15 +58,18 @@ func TestPauseAndResumeWorkspaceState(t *testing.T) {
 func TestListActiveWorkspaceStates(t *testing.T) {
 	db := newTestDB(t)
 
-	for _, id := range []string{"ws-b", "ws-c", "ws-a"} { // ws-a last → highest updated_at
-		if err := db.UpsertWorkspaceState(&WorkspaceState{WorkspaceID: id, Topic: id}); err != nil {
-			t.Fatalf("upsert %s: %v", id, err)
+	ids := make(map[string]uint)
+	for _, topic := range []string{"ws-b", "ws-c", "ws-a"} { // ws-a last → highest updated_at
+		state := &WorkspaceState{Topic: topic}
+		if err := db.UpsertWorkspaceState(state); err != nil {
+			t.Fatalf("upsert %s: %v", topic, err)
 		}
+		ids[topic] = state.ID
 	}
-	if err := db.PauseWorkspaceState("ws-b"); err != nil {
+	if err := db.PauseWorkspaceState(ids["ws-b"]); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	if err := db.ArchiveWorkspaceState("ws-c"); err != nil {
+	if err := db.ArchiveWorkspaceState(ids["ws-c"]); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 
@@ -75,7 +80,7 @@ func TestListActiveWorkspaceStates(t *testing.T) {
 	// Use set-membership check — ordering may vary if timestamps are equal.
 	found := map[string]bool{}
 	for _, s := range active {
-		found[s.WorkspaceID] = true
+		found[s.Topic] = true
 	}
 	if !found["ws-a"] {
 		t.Fatalf("expected ws-a in active results, got: %v", active)
@@ -88,41 +93,32 @@ func TestListActiveWorkspaceStates(t *testing.T) {
 	}
 }
 
-func TestUpsertWorkspaceStateByWorkspaceID(t *testing.T) {
+func TestUpsertWorkspaceStateByID(t *testing.T) {
 	db := newTestDB(t)
-	gdb := db.DB()
 
 	first := &WorkspaceState{
-		WorkspaceID: "ws-1",
-		Topic:       "AI education",
-		OutputGoal:  "Goal A",
-		Snapshot:    `{"version":1}`,
+		Topic:      "AI education",
+		OutputGoal: "Goal A",
 	}
 	if err := db.UpsertWorkspaceState(first); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 
+	workspaceID := first.ID
 	second := &WorkspaceState{
-		WorkspaceID: "ws-1",
-		Topic:       "AI education",
-		OutputGoal:  "Goal B",
-		Snapshot:    `{"version":2}`,
+		Model:      first.Model,
+		Topic:      "AI education",
+		OutputGoal: "Goal B",
 	}
 	if err := db.UpsertWorkspaceState(second); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 
-	var rows []WorkspaceState
-	if err := gdb.Where("workspace_id = ?", "ws-1").Find(&rows).Error; err != nil {
-		t.Fatalf("query workspace rows: %v", err)
+	row, err := db.GetWorkspaceState(workspaceID)
+	if err != nil || row == nil {
+		t.Fatalf("get workspace state: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row for workspace_id ws-1, got %d", len(rows))
-	}
-	if rows[0].OutputGoal != "Goal B" {
-		t.Fatalf("expected latest output goal Goal B, got %s", rows[0].OutputGoal)
-	}
-	if rows[0].Snapshot != `{"version":2}` {
-		t.Fatalf("expected latest snapshot, got %s", rows[0].Snapshot)
+	if row.OutputGoal != "Goal B" {
+		t.Fatalf("expected latest output goal Goal B, got %s", row.OutputGoal)
 	}
 }

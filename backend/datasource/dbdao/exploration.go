@@ -4,79 +4,108 @@ import (
 	"gorm.io/gorm"
 )
 
-func (d *DB) GetSessionGraph(sessionID string) ([]GraphNode, []GraphEdge, error) {
+func (d *DB) GetWorkspaceGraph(workspaceID uint) ([]GraphNode, []GraphEdge, error) {
 	var nodes []GraphNode
-	if err := d.DB().Where("session_id = ?", sessionID).Find(&nodes).Error; err != nil {
+	if err := d.DB().Where("workspace_id = ?", workspaceID).Find(&nodes).Error; err != nil {
 		return nil, nil, err
 	}
 
 	var edges []GraphEdge
-	if err := d.DB().Where("session_id = ?", sessionID).Find(&edges).Error; err != nil {
+	if err := d.DB().Where("workspace_id = ?", workspaceID).Find(&edges).Error; err != nil {
 		return nil, nil, err
 	}
 
 	return nodes, edges, nil
 }
 
+func (d *DB) ReplaceWorkspaceGraph(workspaceID uint, nodes []GraphNode, edges []GraphEdge) error {
+	tx := d.DB().Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	rollback := func(err error) error {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if err := tx.Where("workspace_id = ?", workspaceID).Delete(&GraphNode{}).Error; err != nil {
+		return rollback(err)
+	}
+	if err := tx.Where("workspace_id = ?", workspaceID).Delete(&GraphEdge{}).Error; err != nil {
+		return rollback(err)
+	}
+	if len(nodes) > 0 {
+		if err := tx.Create(&nodes).Error; err != nil {
+			return rollback(err)
+		}
+	}
+	if len(edges) > 0 {
+		if err := tx.Create(&edges).Error; err != nil {
+			return rollback(err)
+		}
+	}
+	return tx.Commit().Error
+}
+
 type RuntimeRunRecord struct {
 	gorm.Model
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	Source      string    `json:"source"`
-	Status      string    `json:"status"`
-	StartedAt   int64     `json:"started_at"`
-	EndedAt     int64     `json:"ended_at"`
+	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
+	Source      string `json:"source"`
+	Status      string `json:"status"`
+	StartedAt   int64  `json:"started_at"`
+	EndedAt     int64  `json:"ended_at"`
 }
 
 type RuntimePlanRecord struct {
 	gorm.Model
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	RunID       string    `json:"run_id" gorm:"index"`
-	Version     int       `json:"version"`
+	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
+	RunID       string `json:"run_id" gorm:"index"`
+	Version     int    `json:"version"`
 }
 
 type RuntimePlanStepRecord struct {
 	gorm.Model
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	RunID       string    `json:"run_id" gorm:"index"`
-	PlanID      string    `json:"plan_id" gorm:"index"`
-	StepIndex   int       `json:"step_index"`
-	Desc        string    `json:"desc"`
-	Status      string    `json:"status"`
+	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
+	RunID       string `json:"run_id" gorm:"index"`
+	PlanID      string `json:"plan_id" gorm:"index"`
+	StepIndex   int    `json:"step_index"`
+	Desc        string `json:"desc"`
+	Status      string `json:"status"`
 }
 
 type RuntimeAgentTaskRecord struct {
 	gorm.Model
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	RunID       string    `json:"run_id" gorm:"index"`
-	PlanID      string    `json:"plan_id" gorm:"index"`
-	PlanStepID  string    `json:"plan_step_id" gorm:"index"`
-	SubAgent    string    `json:"sub_agent"`
-	Goal        string    `json:"goal"`
-	Status      string    `json:"status"`
+	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
+	RunID       string `json:"run_id" gorm:"index"`
+	PlanID      string `json:"plan_id" gorm:"index"`
+	PlanStepID  string `json:"plan_step_id" gorm:"index"`
+	SubAgent    string `json:"sub_agent"`
+	Goal        string `json:"goal"`
+	Status      string `json:"status"`
 }
 
 type RuntimeTaskResultRecord struct {
 	gorm.Model
-	TaskID      string    `json:"task_id" gorm:"index"`
-	WorkspaceID string    `json:"workspace_id" gorm:"index"`
-	Summary     string    `json:"summary"`
-	IsSuccess   bool      `json:"is_success"`
+	TaskID      string `json:"task_id" gorm:"index"`
+	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
+	Summary     string `json:"summary"`
+	IsSuccess   bool   `json:"is_success"`
 }
 
 type RuntimeBalanceRecord struct {
 	gorm.Model
-	WorkspaceID        string    `json:"workspace_id" gorm:"index"`
-	RunID              string    `json:"run_id" gorm:"index"`
-	Divergence         float64   `json:"divergence"`
-	Research           float64   `json:"research"`
-	Aggression         float64   `json:"aggression"`
-	Reason             string    `json:"reason"`
-	UpdatedAtMs        int64     `json:"updated_at"`
-	LatestReplanReason string    `json:"latest_replan_reason"`
+	WorkspaceID        uint    `json:"workspace_id" gorm:"index"`
+	RunID              string  `json:"run_id" gorm:"index"`
+	Divergence         float64 `json:"divergence"`
+	Research           float64 `json:"research"`
+	Aggression         float64 `json:"aggression"`
+	Reason             string  `json:"reason"`
+	UpdatedAtMs        int64   `json:"updated_at"`
+	LatestReplanReason string  `json:"latest_replan_reason"`
 }
 
 type RuntimeStateProjection struct {
-	WorkspaceID        string
+	WorkspaceID        uint
 	Runs               []RuntimeRunRecord
 	Plans              []RuntimePlanRecord
 	PlanSteps          []RuntimePlanStepRecord
@@ -144,7 +173,7 @@ func (d *DB) ReplaceWorkspaceRuntimeProjection(state RuntimeStateProjection) err
 	return tx.Commit().Error
 }
 
-func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID string) (*RuntimeStateProjection, error) {
+func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID uint) (*RuntimeStateProjection, error) {
 	var runs []RuntimeRunRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).

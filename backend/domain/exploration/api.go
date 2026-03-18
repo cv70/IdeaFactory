@@ -10,6 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func normalizedLegacyWorkspaceID(c *gin.Context) (string, bool) {
+	workspaceID, err := parseWorkspaceID(c.Param("workspaceID"))
+	if err != nil {
+		utils.RespError(c, http.StatusBadRequest, "workspaceID must be a positive integer")
+		return "", false
+	}
+	return formatWorkspaceID(workspaceID), true
+}
+
 func (d *ExplorationDomain) ApiCreateWorkspace(c *gin.Context) {
 	var req CreateWorkspaceReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -37,7 +46,10 @@ func (d *ExplorationDomain) ApiListWorkspaces(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiGetWorkspace(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	snapshot, ok := d.GetWorkspace(workspaceID)
 	if !ok {
 		utils.RespError(c, 404, "workspace not found")
@@ -47,7 +59,10 @@ func (d *ExplorationDomain) ApiGetWorkspace(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiGetRuntimeState(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	// Ensure workspace exists and runtime has been initialized for loaded sessions.
 	if _, ok := d.GetWorkspace(workspaceID); !ok {
 		utils.RespError(c, 404, "workspace not found")
@@ -74,7 +89,10 @@ func (d *ExplorationDomain) ApiGetRuntimeState(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiReplayMutations(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	cursor := c.Query("cursor")
 	if cursor == "" {
 		since, _ := strconv.ParseInt(c.Query("since"), 10, 64)
@@ -93,7 +111,10 @@ func (d *ExplorationDomain) ApiReplayMutations(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiUpdateStrategy(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	var req UpdateStrategyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespError(c, 400, "failed to parse strategy request")
@@ -109,7 +130,10 @@ func (d *ExplorationDomain) ApiUpdateStrategy(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiArchiveWorkspace(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	if ok := d.ArchiveWorkspace(workspaceID); !ok {
 		utils.RespError(c, 404, "workspace not found")
 		return
@@ -118,7 +142,10 @@ func (d *ExplorationDomain) ApiArchiveWorkspace(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiInterveneWorkspace(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	var req InterventionReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespError(c, 400, "failed to parse intervention request")
@@ -150,7 +177,10 @@ func (d *ExplorationDomain) ApiCreateSession(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiGetSession(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	snapshot, ok := d.GetWorkspace(workspaceID)
 	if !ok {
 		utils.RespError(c, 404, "exploration not found")
@@ -160,7 +190,10 @@ func (d *ExplorationDomain) ApiGetSession(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiExpandOpportunity(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	opportunityID := c.Param("opportunityID")
 	snapshot, mutations, ok := d.ApplyIntervention(workspaceID, InterventionReq{
 		Type:     InterventionExpandOpportunity,
@@ -175,7 +208,10 @@ func (d *ExplorationDomain) ApiExpandOpportunity(c *gin.Context) {
 }
 
 func (d *ExplorationDomain) ApiFeedback(c *gin.Context) {
-	workspaceID := c.Param("workspaceID")
+	workspaceID, ok := normalizedLegacyWorkspaceID(c)
+	if !ok {
+		return
+	}
 	var req FeedbackReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespError(c, 400, "failed to parse feedback request")

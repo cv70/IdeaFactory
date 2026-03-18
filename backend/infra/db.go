@@ -14,12 +14,28 @@ func NewDB(ctx context.Context, c *config.DatabaseConfig) (*dbdao.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One-time destructive migration for the snapshot era schema. When the legacy
+	// snapshot column exists, we reset exploration persistence tables and rebuild
+	// the normalized schema from scratch.
+	if db.Migrator().HasColumn(&dbdao.WorkspaceState{}, "snapshot") {
+		_ = db.Migrator().DropTable(
+			"workspace_runtime_states",
+			&dbdao.RuntimeBalanceRecord{},
+			&dbdao.RuntimeTaskResultRecord{},
+			&dbdao.RuntimeAgentTaskRecord{},
+			&dbdao.RuntimePlanStepRecord{},
+			&dbdao.RuntimePlanRecord{},
+			&dbdao.RuntimeRunRecord{},
+			&dbdao.GraphEdge{},
+			&dbdao.GraphNode{},
+			&dbdao.WorkspaceState{},
+		)
+	}
 	db.AutoMigrate(
 		&dbdao.ExplorationSession{},
 		&dbdao.GraphNode{},
 		&dbdao.GraphEdge{},
 		&dbdao.WorkspaceState{},
-		&dbdao.WorkspaceRuntimeState{},
 		&dbdao.RuntimeRunRecord{},
 		&dbdao.RuntimePlanRecord{},
 		&dbdao.RuntimePlanStepRecord{},
