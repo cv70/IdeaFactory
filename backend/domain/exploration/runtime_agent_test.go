@@ -1,6 +1,7 @@
 package exploration
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -137,6 +138,17 @@ func TestSnapshotForCycle_ReturnsFalseWhenNoTodoSteps(t *testing.T) {
 	_, _, hasTodo := domain.snapshotForCycle(wsID)
 	if hasTodo {
 		t.Fatal("expected hasTodo=false when no Todo steps")
+	}
+}
+
+func TestStart_DoesNotPanicWithNilDB(t *testing.T) {
+	// The test domain has no DB — Start should handle this gracefully (no-op for DB path).
+	domain := newTestExplorationDomain()
+	ctx := context.Background()
+
+	// Should not panic or error even with nil DB.
+	if err := domain.Start(ctx); err != nil {
+		t.Fatalf("Start returned error: %v", err)
 	}
 }
 

@@ -33,6 +33,7 @@ func main() {
 	explorationDomain, err := exploration.BuildExplorationDomain(registry)
 	mistake.Unwrap(err)
 	exploration.RegisterRoutes(v1, explorationDomain)
+	go explorationDomain.Start(ctx) // resume active workspaces after restart
 
 	err = r.Run(":8888")
 	mistake.Unwrap(err)

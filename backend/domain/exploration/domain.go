@@ -5,6 +5,7 @@ import (
 	"backend/datasource/dbdao"
 	"backend/infra"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
@@ -119,4 +120,32 @@ func BuildExplorationDomain(registry *infra.Registry) (*ExplorationDomain, error
 	domain.General = g
 	domain.DeepAgent, err = agents.NewExplorationAgent(ctx, registry.Model)
 	return domain, err
+}
+
+// Start loads all active (non-paused, non-archived) workspaces from the DB and
+// schedules a run for each. It is non-fatal per workspace: errors are logged and skipped.
+// Call this after RegisterRoutes so WS subscribers can receive mutation events.
+// Run in a goroutine from main.go to avoid blocking HTTP server startup.
+func (d *ExplorationDomain) Start(ctx context.Context) error {
+	if d.DB == nil {
+		return nil
+	}
+	states, err := d.DB.ListActiveWorkspaceStates(200)
+	if err != nil {
+		return fmt.Errorf("Start: list active workspaces: %w", err)
+	}
+	for _, state := range states {
+		wsID := state.WorkspaceID
+		session, ok := d.loadWorkspace(wsID)
+		if !ok || session == nil {
+			continue
+		}
+		d.store.mu.Lock()
+		d.store.workspaces[wsID] = session
+		d.store.mu.Unlock()
+
+		d.restoreRuntimeState(wsID)
+		d.scheduleNextRun(wsID)
+	}
+	return nil
 }
