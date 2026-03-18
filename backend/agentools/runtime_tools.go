@@ -3,8 +3,6 @@ package agentools
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/kaptinlin/jsonrepair"
 )
 
 type WrappedToolResponse struct {
@@ -24,13 +22,8 @@ func (RuntimeToolWrapper) NormalizeToolCall(toolName string, arguments string) (
 		return WrappedToolResponse{}, fmt.Errorf("tool name is required")
 	}
 
-	repaired, err := jsonrepair.Repair(arguments)
-	if err != nil {
-		return WrappedToolResponse{}, fmt.Errorf("repair tool args: %w", err)
-	}
-
 	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(repaired), &payload); err != nil {
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
 		return WrappedToolResponse{}, fmt.Errorf("decode tool args: %w", err)
 	}
 

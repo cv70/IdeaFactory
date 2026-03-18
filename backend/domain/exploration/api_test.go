@@ -1319,3 +1319,37 @@ func TestCreateRun_IdempotentWhenAlreadyRunning(t *testing.T) {
 		t.Fatalf("expected 200 for idempotent re-request, got %d", runW.Code)
 	}
 }
+
+func TestGetWorkspaceReturnsActiveStatus(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"status test","output_goal":"goal"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: unexpected status %d", w.Code)
+	}
+
+	var createResp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	wsID := createResp.Workspace.ID
+
+	getReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID, nil)
+	getW := httptest.NewRecorder()
+	r.ServeHTTP(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("get: unexpected status %d", getW.Code)
+	}
+
+	var getResp WorkspaceResponse
+	if err := json.Unmarshal(getW.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("decode get: %v\n", err)
+	}
+	if getResp.Workspace.Status != WorkspaceStatusActive {
+		t.Fatalf("expected status active, got %s", getResp.Workspace.Status)
+	}
+}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
-	"github.com/kaptinlin/jsonrepair"
 )
 
 // LLMPlanner implements Planner by dispatching to specialist agents for node generation.
@@ -389,9 +388,5 @@ func runAgent(ctx context.Context, agent adk.Agent, prompt string) (string, erro
 
 // parseJSON repairs and unmarshals JSON agent output.
 func parseJSON(text string, dest any) error {
-	repaired, err := jsonrepair.Repair(text)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal([]byte(repaired), dest)
+	return json.Unmarshal([]byte(text), dest)
 }

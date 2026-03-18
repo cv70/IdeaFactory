@@ -86,7 +86,7 @@ func runAgent(ctx context.Context, agent adk.Agent, prompt string) (string, erro
 }
 ```
 
-`GetMessage()` handles both streaming and non-streaming `MessageVariant`. The returned string is passed to `jsonrepair` + `json.Unmarshal`.
+`GetMessage()` handles both streaming and non-streaming `MessageVariant`. The returned string is passed to `json.Unmarshal`.
 
 #### Callers of `GenerateNodesForCycle` and session snapshots
 
@@ -365,7 +365,7 @@ runAgentCycle goroutine (only used for new runs; other callers pass existing ses
     │       ├─ build prompt with existing node IDs
     │       ├─ agent.Run(stepCtx, input) → iter.Next() loop → extract lastContent
     │       ├─ validate direction_ids, drop invalid
-    │       ├─ jsonrepair + json.Unmarshal → []Node, []Edge
+    │       ├─ json.Unmarshal → []Node, []Edge
     │       └─ on error: fallback.generateXxx() directly
     │
     ├─ applyGeneratedNodes → store.mu.Lock, diffMutations, broadcastMutations (WebSocket)
@@ -381,7 +381,7 @@ runAgentCycle goroutine (only used for new runs; other callers pass existing ses
 | Scenario | Behavior |
 |---|---|
 | Agent call error | Log; call specific `DeterministicPlanner.generateXxx()` for this priority; continue |
-| JSON parse failure | `jsonrepair` first; then `DeterministicPlanner.generateXxx()` |
+| JSON parse failure | first; then `DeterministicPlanner.generateXxx()` |
 | All `direction_id` values invalid after validation | Treat as parse failure → fallback |
 | Agent is nil | Same as agent call error → fallback |
 | Step timeout (2 min) | Agent call cancelled → fallback for that step |

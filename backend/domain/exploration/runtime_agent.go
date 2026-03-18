@@ -541,6 +541,9 @@ func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 		Run:         &GenerationRun{ID: completedRunID},
 		CreatedAt:   time.Now().UnixMilli(),
 	}})
+	// Schedule the next run (respects pause state, MaxRuns, and IntervalMs).
+	// Not called on the panic path — the defer handler exits before reaching here.
+	d.scheduleNextRun(workspaceID)
 }
 
 // triggerRun creates a new run for the workspace and launches runAgentCycle in a goroutine.
