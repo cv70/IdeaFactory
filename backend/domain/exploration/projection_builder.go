@@ -19,7 +19,7 @@ func (d *ExplorationDomain) ApiV1GetProjection(c *gin.Context) {
 	c.JSON(http.StatusOK, projection)
 }
 
-func (d *ExplorationDomain) buildProjectionResponse(snapshot WorkspaceSnapshot) ProjectionResponse {
+func (d *ExplorationDomain) buildProjectionResponse(snapshot *WorkspaceSnapshot) ProjectionResponse {
 	now := time.Now().UnixMilli()
 	view := ProjectionView{
 		WorkspaceID: snapshot.Exploration.ID,

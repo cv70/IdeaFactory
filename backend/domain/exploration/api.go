@@ -16,7 +16,12 @@ func (d *ExplorationDomain) ApiCreateWorkspace(c *gin.Context) {
 		utils.RespError(c, 400, "failed to parse create workspace request")
 		return
 	}
-	utils.RespSuccess(c, d.CreateWorkspace(req))
+	created, err := d.CreateWorkspace(req)
+	if err != nil {
+		utils.RespError(c, 500, "failed to create workspace")
+		return
+	}
+	utils.RespSuccess(c, created)
 }
 
 func (d *ExplorationDomain) ApiListWorkspaces(c *gin.Context) {
@@ -224,7 +229,16 @@ func (d *ExplorationDomain) ApiWebSocket(c *gin.Context) {
 				})
 				continue
 			}
-			snapshot := d.CreateWorkspace(payload)
+			snapshot, err := d.CreateWorkspace(payload)
+			if err != nil {
+				_ = d.writeEnvelope(client, wsEnvelope{
+					Type:      "response",
+					RequestID: req.RequestID,
+					Code:      http.StatusInternalServerError,
+					Msg:       "failed to create workspace",
+				})
+				continue
+			}
 			_ = d.writeEnvelope(client, wsEnvelope{
 				Type:      "response",
 				RequestID: req.RequestID,

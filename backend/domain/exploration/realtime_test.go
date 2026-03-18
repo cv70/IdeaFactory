@@ -29,11 +29,12 @@ func newTestExplorationDomain() *ExplorationDomain {
 
 func TestRuntimeContinuouslyExpandsWorkspace(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
 	initialRuns := len(created.Exploration.Runs)
 
 	time.Sleep(4500 * time.Millisecond)
@@ -49,11 +50,12 @@ func TestRuntimeContinuouslyExpandsWorkspace(t *testing.T) {
 
 func TestRunPlanTaskPersistence(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
 
 	state, ok := domain.GetRuntimeState(created.Exploration.ID)
 	if !ok {
@@ -106,11 +108,12 @@ func TestRuntimeContext(t *testing.T) {
 
 func TestRunCreatesExplicitPlan(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
 
 	state, ok := domain.GetRuntimeState(created.Exploration.ID)
 	if !ok {
@@ -126,11 +129,12 @@ func TestRunCreatesExplicitPlan(t *testing.T) {
 
 func TestPlanStepTransitions(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
 
 	state, ok := domain.GetRuntimeState(created.Exploration.ID)
 	if !ok {
@@ -157,11 +161,12 @@ func TestPlanStepTransitions(t *testing.T) {
 
 func TestInterventionTriggersReplanning(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
 
 	before, ok := domain.GetRuntimeState(created.Exploration.ID)
 	if !ok {
@@ -232,11 +237,13 @@ func TestWrappedToolResponses(t *testing.T) {
 
 func TestDeepAgentRunE2E(t *testing.T) {
 	domain := newTestExplorationDomain()
-	created := domain.CreateWorkspace(CreateWorkspaceReq{
+	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
 		Constraints: "Low-cost",
 	})
+	mistake.Unwrap(err)
+
 	initialNodes := len(created.DirectionMap.Nodes)
 
 	time.Sleep(200 * time.Millisecond)

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cv70/pkgo/mistake"
 	"github.com/gin-gonic/gin"
 )
 
@@ -1164,7 +1165,8 @@ func TestDeterministicPlannerConvergence(t *testing.T) {
 func TestInterventionAdjustsBalanceState(t *testing.T) {
 	domain := newTestExplorationDomain()
 	req := CreateWorkspaceReq{Topic: "quantum computing", OutputGoal: "summary"}
-	snapshot := domain.CreateWorkspace(req)
+	snapshot, err := domain.CreateWorkspace(req)
+	mistake.Unwrap(err)
 	wsID := snapshot.Exploration.ID
 
 	// Set known balance state
@@ -1194,7 +1196,8 @@ func TestMutationEventsWrittenOnRunComplete(t *testing.T) {
 	wsID := ""
 	{
 		req := CreateWorkspaceReq{Topic: "autonomous vehicles safety", OutputGoal: "risk summary"}
-		snapshot := domain.CreateWorkspace(req)
+		snapshot, err := domain.CreateWorkspace(req)
+		mistake.Unwrap(err)
 		wsID = snapshot.Exploration.ID
 		// Also call initializeWorkspaceGraph (normally called from handler)
 		domain.initializeWorkspaceGraph(context.Background(), wsID)
@@ -1226,7 +1229,8 @@ func TestRuntimeCycleAddsEvidenceNodes(t *testing.T) {
 	_, domain := newTestRouterWithDomain()
 
 	// Create workspace and seed initial Direction nodes
-	snapshot := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "machine learning safety", OutputGoal: "risk report"})
+	snapshot, err := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "machine learning safety", OutputGoal: "risk report"})
+	mistake.Unwrap(err)
 	wsID := snapshot.Exploration.ID
 	domain.initializeWorkspaceGraph(context.Background(), wsID)
 

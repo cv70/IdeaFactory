@@ -15,6 +15,7 @@ import {
   expandOpportunity as expandOpportunityRequest,
   getExploration,
   listWorkspaces,
+  patchWorkspaceStatus,
   replayExplorationMutations,
   sendFeedback,
   subscribeExploration,
@@ -407,6 +408,27 @@ function App() {
     setLoading(false)
   }
 
+  async function handleToggleWorkspaceStatus() {
+    if (!exploration) return
+    setLoading(true)
+    setError('')
+    const targetStatus = exploration.workspaceStatus === 'paused' ? 'active' : 'paused'
+    const nextStatus = await patchWorkspaceStatus(exploration.id, targetStatus)
+    if (!nextStatus) {
+      setError('Failed to update workspace status')
+      setLoading(false)
+      return
+    }
+    setExploration((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        workspaceStatus: nextStatus,
+      }
+    })
+    setLoading(false)
+  }
+
   function handleExampleSelect(example: string) {
     setTopic(example)
   }
@@ -453,8 +475,10 @@ function App() {
             <>
               <WorkspaceHeader
                 topic={exploration?.topic ?? ''}
+                workspaceStatus={exploration?.workspaceStatus ?? 'active'}
                 loading={loading}
                 error={error || undefined}
+                onTogglePause={() => void handleToggleWorkspaceStatus()}
                 onArchive={() => exploration && void handleArchiveWorkspace(exploration.id)}
               />
               <GraphView

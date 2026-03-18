@@ -29,6 +29,8 @@ const translations = {
     // Workspaces
     'workspaces.empty': 'No historical workspaces yet.',
     'workspaces.open': 'Open',
+    'workspaces.pause': 'Pause',
+    'workspaces.resume': 'Resume',
     'workspaces.archive': 'Archive',
 
     // Workbench map column
@@ -123,6 +125,8 @@ const translations = {
     // Workspaces
     'workspaces.empty': '暂无历史工作空间。',
     'workspaces.open': '打开',
+    'workspaces.pause': '暂停',
+    'workspaces.resume': '继续',
     'workspaces.archive': '归档',
 
     // Workbench map column

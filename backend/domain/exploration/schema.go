@@ -64,7 +64,7 @@ type NodeMetadata struct {
 }
 
 type Node struct {
-	ID              string       `json:"id" gorm:"primaryKey"`
+	ID              string       `json:"id"`
 	WorkspaceID     string       `json:"workspace_id" gorm:"index"`
 	SessionID       string       `json:"sessionId"` // Internal/Runtime ID
 	Type            NodeType     `json:"type"`
@@ -80,7 +80,7 @@ type Node struct {
 }
 
 type Edge struct {
-	ID          string   `json:"id" gorm:"primaryKey"`
+	ID          string   `json:"id"`
 	WorkspaceID string   `json:"workspace_id" gorm:"index"`
 	From        string   `json:"from"`
 	To          string   `json:"to"`
@@ -88,7 +88,7 @@ type Edge struct {
 }
 
 type GenerationRun struct {
-	ID      string `json:"id" gorm:"primaryKey"`
+	ID      string `json:"id"`
 	Round   int    `json:"round"`
 	Focus   string `json:"focus"`
 	Summary string `json:"summary"`
@@ -193,7 +193,7 @@ type RuntimeStrategy struct {
 }
 
 type ExplorationSession struct {
-	ID                  string          `json:"id" gorm:"primaryKey"`
+	ID                  string          `json:"id"`
 	Topic               string          `json:"topic"`
 	OutputGoal          string          `json:"outputGoal"`
 	Constraints         string          `json:"constraints"`
@@ -265,7 +265,7 @@ const (
 )
 
 type Intervention struct {
-	ID          string           `json:"id" gorm:"primaryKey"`
+	ID          string           `json:"id"`
 	WorkspaceID string           `json:"workspace_id" gorm:"index"`
 	Type        InterventionType `json:"type"`
 	TargetID    string           `json:"target_id"`

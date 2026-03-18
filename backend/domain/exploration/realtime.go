@@ -25,7 +25,7 @@ type wsEnvelope struct {
 	WorkspaceID string               `json:"workspace_id,omitempty"`
 	Code        int                  `json:"code,omitempty"`
 	Msg         string               `json:"msg,omitempty"`
-	Data        WorkspaceSnapshot    `json:"data,omitempty"`
+	Data        *WorkspaceSnapshot   `json:"data,omitempty"`
 	Runtime     RuntimeStateSnapshot `json:"runtime,omitempty"`
 	Mutations   []MutationEvent      `json:"mutations,omitempty"`
 	NextCursor  string               `json:"next_cursor,omitempty"`
@@ -71,7 +71,7 @@ func (d *ExplorationDomain) writeEnvelope(client *wsClient, msg wsEnvelope) erro
 	return client.conn.WriteJSON(msg)
 }
 
-func (d *ExplorationDomain) broadcastSnapshot(workspaceID string, snapshot WorkspaceSnapshot) {
+func (d *ExplorationDomain) broadcastSnapshot(workspaceID string, snapshot *WorkspaceSnapshot) {
 	d.ws.mu.RLock()
 	subs := d.ws.subscribers[workspaceID]
 	clients := make([]*wsClient, 0, len(subs))

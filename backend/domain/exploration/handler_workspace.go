@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"backend/datasource/dbdao"
+	"backend/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,10 +14,14 @@ import (
 func (d *ExplorationDomain) ApiV1CreateWorkspace(c *gin.Context) {
 	var req CreateWorkspaceReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		writeV1Error(c, http.StatusBadRequest, "invalid_argument", "failed to parse create workspace request")
+		utils.RespError(c, http.StatusBadRequest, "failed to parse create workspace request")
 		return
 	}
-	snapshot := d.CreateWorkspace(req)
+	snapshot, err := d.CreateWorkspace(req)
+	if err != nil {
+		utils.RespError(c, http.StatusInternalServerError, "failed to create workspace")
+		return
+	}
 	d.initializeWorkspaceGraph(c.Request.Context(), snapshot.Exploration.ID)
 	// Re-fetch so the response includes seeded Direction nodes.
 	if updated, ok := d.GetWorkspace(snapshot.Exploration.ID); ok {

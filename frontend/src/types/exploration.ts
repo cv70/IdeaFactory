@@ -1,3 +1,5 @@
+import type { WorkspaceStatus } from './workspace'
+
 export type NodeType =
   | 'topic'
   | 'question'
@@ -68,6 +70,7 @@ export type ExplorationSession = {
   topic: string
   outputGoal: string
   constraints: string
+  workspaceStatus?: WorkspaceStatus
   strategy?: RuntimeStrategy
   activeOpportunityId: string
   nodes: Node[]

@@ -181,6 +181,32 @@ describe('idea factory app', () => {
     })
   })
 
+  it('pauses and resumes active workspace from workspace header', async () => {
+    vi.spyOn(explorationApi, 'patchWorkspaceStatus')
+      .mockResolvedValueOnce('paused')
+      .mockResolvedValueOnce('active')
+
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'AI education' } })
+    fireEvent.change(screen.getByLabelText('输出目标'), {
+      target: { value: 'Research directions' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '开始探索' }))
+
+    const pauseButton = await screen.findByRole('button', { name: '暂停' })
+    fireEvent.click(pauseButton)
+    await waitFor(() => {
+      expect(explorationApi.patchWorkspaceStatus).toHaveBeenCalledWith(expect.any(String), 'paused')
+    })
+
+    const resumeButton = await screen.findByRole('button', { name: '继续' })
+    fireEvent.click(resumeButton)
+    await waitFor(() => {
+      expect(explorationApi.patchWorkspaceStatus).toHaveBeenCalledWith(expect.any(String), 'active')
+    })
+  })
+
   it('shows an error message when exploration creation fails', async () => {
     vi.spyOn(explorationApi, 'createExploration').mockResolvedValueOnce({
       code: 500,

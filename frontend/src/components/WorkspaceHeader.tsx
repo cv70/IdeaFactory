@@ -1,9 +1,12 @@
+import type { WorkspaceStatus } from '../types/workspace'
 import { useTranslation } from '../lib/i18n'
 
 type WorkspaceHeaderProps = {
   topic: string
+  workspaceStatus: WorkspaceStatus
   loading?: boolean
   error?: string
+  onTogglePause: () => void
   onArchive: () => void
 }
 
@@ -16,6 +19,16 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
         {props.error && (
           <span className="workspaceError">{props.error}</span>
         )}
+        <button
+          type="button"
+          className="miniAction"
+          onClick={props.onTogglePause}
+          disabled={props.loading}
+        >
+          {props.workspaceStatus === 'paused'
+            ? t('workspaces.resume')
+            : t('workspaces.pause')}
+        </button>
         <button
           type="button"
           className="miniAction"

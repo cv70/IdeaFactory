@@ -9,13 +9,10 @@ import (
 	"time"
 )
 
-func (d *ExplorationDomain) persistWorkspace(session ExplorationSession) {
-	if d.DB == nil {
-		return
-	}
+func (d *ExplorationDomain) persistWorkspace(session ExplorationSession) error {
 	raw, err := json.Marshal(session)
 	if err != nil {
-		return
+		return err
 	}
 
 	state := &dbdao.WorkspaceState{
@@ -33,7 +30,11 @@ func (d *ExplorationDomain) persistWorkspace(session ExplorationSession) {
 		state.PausedAt = existing.PausedAt
 		state.ArchivedAt = existing.ArchivedAt
 	}
-	_ = d.DB.UpsertWorkspaceState(state)
+	err = d.DB.UpsertWorkspaceState(state)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *ExplorationDomain) loadWorkspace(workspaceID string) (*ExplorationSession, bool) {

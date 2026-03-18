@@ -257,25 +257,29 @@ func filterNodesByType(nodes []Node, nodeType NodeType) []Node {
 	return out
 }
 
-func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) WorkspaceSnapshot {
+func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) (*WorkspaceSnapshot, error) {
 	session := createWorkspace(req)
 	d.store.mu.Lock()
 	d.store.workspaces[session.ID] = &session
 	d.store.mu.Unlock()
-	d.persistWorkspace(session)
+	err := d.persistWorkspace(session)
+	if err != nil {
+		return nil, err
+	}
 	d.initializeRuntimeState(session, "workspace_create")
 	d.startRuntime(session.ID)
-	return d.buildWorkspaceSnapshot(session, "")
+	snapshot := d.buildWorkspaceSnapshot(session, "")
+	return snapshot, nil
 }
 
-func (d *ExplorationDomain) GetWorkspace(workspaceID string) (WorkspaceSnapshot, bool) {
+func (d *ExplorationDomain) GetWorkspace(workspaceID string) (*WorkspaceSnapshot, bool) {
 	d.store.mu.RLock()
 	session, ok := d.store.workspaces[workspaceID]
 	d.store.mu.RUnlock()
 	if !ok {
 		loaded, found := d.loadWorkspace(workspaceID)
 		if !found {
-			return WorkspaceSnapshot{}, false
+			return nil, false
 		}
 		d.store.mu.Lock()
 		d.store.workspaces[workspaceID] = loaded
@@ -288,7 +292,8 @@ func (d *ExplorationDomain) GetWorkspace(workspaceID string) (WorkspaceSnapshot,
 	copySession := *session
 	d.restoreRuntimeState(workspaceID)
 	d.initializeRuntimeState(copySession, "workspace_read")
-	return d.buildWorkspaceSnapshot(copySession, ""), true
+	snapshot := d.buildWorkspaceSnapshot(copySession, "")
+	return snapshot, true
 }
 
 func byBranch(nodes []Node, branchID string, nodeType NodeType) []Node {
@@ -351,7 +356,7 @@ func buildWorkbenchProjection(session ExplorationSession, activeOpportunityID st
 	}
 }
 
-func (d *ExplorationDomain) buildWorkspaceSnapshot(session ExplorationSession, activeOpportunityID string) WorkspaceSnapshot {
+func (d *ExplorationDomain) buildWorkspaceSnapshot(session ExplorationSession, activeOpportunityID string) *WorkspaceSnapshot {
 	workbench := buildWorkbenchProjection(session, activeOpportunityID)
 	if runtimeState, ok := d.GetRuntimeState(session.ID); ok {
 		workbench.CurrentFocus = session.ActiveOpportunityID
@@ -364,7 +369,7 @@ func (d *ExplorationDomain) buildWorkspaceSnapshot(session ExplorationSession, a
 		workbench.LatestReplanReason = runtimeState.LatestReplanReason
 	}
 
-	return WorkspaceSnapshot{
+	return &WorkspaceSnapshot{
 		Exploration:  session,
 		DirectionMap: buildDirectionMapProjection(session),
 		Workbench:    workbench,
@@ -449,14 +454,14 @@ func chooseRuntimeTarget(session ExplorationSession, state *RuntimeWorkspaceStat
 	return session.ActiveOpportunityID
 }
 
-func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrategyReq) (WorkspaceSnapshot, []MutationEvent, bool) {
+func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrategyReq) (*WorkspaceSnapshot, []MutationEvent, bool) {
 	d.store.mu.Lock()
 	session, ok := d.store.workspaces[workspaceID]
 	if !ok {
 		d.store.mu.Unlock()
 		loaded, found := d.loadWorkspace(workspaceID)
 		if !found {
-			return WorkspaceSnapshot{}, nil, false
+			return nil, nil, false
 		}
 		d.store.mu.Lock()
 		d.store.workspaces[workspaceID] = loaded
@@ -497,18 +502,18 @@ func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrateg
 	}
 	d.persistMutations(mutations)
 	d.startRuntime(workspaceID)
-
-	return d.buildWorkspaceSnapshot(next, ""), mutations, true
+	snapshot := d.buildWorkspaceSnapshot(next, "")
+	return snapshot, mutations, true
 }
 
-func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req InterventionReq) (WorkspaceSnapshot, []MutationEvent, bool) {
+func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req InterventionReq) (*WorkspaceSnapshot, []MutationEvent, bool) {
 	d.store.mu.Lock()
 	session, ok := d.store.workspaces[workspaceID]
 	if !ok {
 		d.store.mu.Unlock()
 		loaded, found := d.loadWorkspace(workspaceID)
 		if !found {
-			return WorkspaceSnapshot{}, nil, false
+			return nil, nil, false
 		}
 		d.store.mu.Lock()
 		d.store.workspaces[workspaceID] = loaded
@@ -530,7 +535,7 @@ func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req Interventi
 		// Runtime replanning absorbs this intervention.
 	default:
 		d.store.mu.Unlock()
-		return WorkspaceSnapshot{}, nil, false
+		return nil, nil, false
 	}
 	d.store.workspaces[workspaceID] = &next
 	d.store.mu.Unlock()
@@ -544,11 +549,14 @@ func (d *ExplorationDomain) ApplyIntervention(workspaceID string, req Interventi
 }
 
 func (d *ExplorationDomain) CreateSession(req *CreateSessionReq) (*ExplorationSession, error) {
-	snapshot := d.CreateWorkspace(CreateWorkspaceReq{
+	snapshot, err := d.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       req.Topic,
 		OutputGoal:  req.OutputGoal,
 		Constraints: req.Constraints,
 	})
+	if err != nil {
+		return nil, err
+	}
 	session := snapshot.Exploration
 	return &session, nil
 }

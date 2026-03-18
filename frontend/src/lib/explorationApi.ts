@@ -5,6 +5,7 @@ import type {
   FeedbackRequest,
 } from '../types/api'
 import type { Edge, ExplorationMutation, ExplorationSession, Node } from '../types/exploration'
+import type { WorkspaceStatus } from '../types/workspace'
 import { buildWorkbenchView, createExplorationSession, expandOpportunity, materializeOpportunity, toggleFavoriteIdea } from './workbench'
 import { createMockExplorationRepository } from './mockExplorationRepository'
 import { subscribeWorkspace, wsReplayMutations, wsRequest } from './explorationSocket'
@@ -71,6 +72,7 @@ type V1WorkspaceResponse = {
     topic: string
     goal: string
     constraints?: string[]
+    status?: WorkspaceStatus
   }
 }
 
@@ -167,6 +169,7 @@ function toPayloadFromV1(workspace: V1WorkspaceResponse['workspace'], projection
     topic: workspace.topic,
     outputGoal: workspace.goal,
     constraints: (workspace.constraints ?? []).join(', '),
+    workspaceStatus: normalizeWorkspaceStatus(workspace.status),
     activeOpportunityId,
     nodes,
     edges,
@@ -184,6 +187,13 @@ function toPayloadFromV1(workspace: V1WorkspaceResponse['workspace'], projection
     exploration: session,
     presentation: buildWorkbenchView(session),
   }
+}
+
+function normalizeWorkspaceStatus(status: string | undefined): WorkspaceStatus {
+  if (status === 'draft' || status === 'active' || status === 'paused' || status === 'archived') {
+    return status
+  }
+  return 'active'
 }
 
 function toggleFavorite(ids: string[], nodeId: string) {
@@ -491,4 +501,17 @@ export async function archiveWorkspace(workspaceId: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export async function patchWorkspaceStatus(
+  workspaceId: string,
+  status: 'active' | 'paused',
+): Promise<WorkspaceStatus | null> {
+  const response = await requestV1<V1WorkspaceResponse>(`/workspaces/${workspaceId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  })
+  if (!response || response.status !== 200) return null
+  return normalizeWorkspaceStatus(response.data.workspace.status)
 }
