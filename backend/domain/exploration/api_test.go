@@ -1320,6 +1320,102 @@ func TestCreateRun_IdempotentWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestPatchWorkspacePause(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	// Create workspace
+	createBody := []byte(`{"topic":"pause test","output_goal":"goal"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+	var createResp WorkspaceResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	wsID := createResp.Workspace.ID
+
+	// Pause it
+	patchBody := []byte(`{"status":"paused"}`)
+	patchReq, _ := http.NewRequest(http.MethodPatch, "/api/v1/workspaces/"+wsID, bytes.NewBuffer(patchBody))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchW := httptest.NewRecorder()
+	r.ServeHTTP(patchW, patchReq)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch pause: unexpected status %d body=%s", patchW.Code, patchW.Body.String())
+	}
+	var patchResp WorkspaceResponse
+	if err := json.Unmarshal(patchW.Body.Bytes(), &patchResp); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	if patchResp.Workspace.Status != WorkspaceStatusPaused {
+		t.Fatalf("expected paused, got %s", patchResp.Workspace.Status)
+	}
+}
+
+func TestPatchWorkspaceResume(t *testing.T) {
+	r, domain := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"resume test","output_goal":"goal"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d", w.Code)
+	}
+	var createResp WorkspaceResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	wsID := createResp.Workspace.ID
+
+	// Pause first (if DB is present)
+	if domain.DB != nil {
+		if err := domain.DB.PauseWorkspaceState(wsID); err != nil {
+			t.Fatalf("pause: %v", err)
+		}
+	}
+
+	// Resume
+	patchBody := []byte(`{"status":"active"}`)
+	patchReq, _ := http.NewRequest(http.MethodPatch, "/api/v1/workspaces/"+wsID, bytes.NewBuffer(patchBody))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchW := httptest.NewRecorder()
+	r.ServeHTTP(patchW, patchReq)
+	if patchW.Code != http.StatusOK {
+		t.Fatalf("patch resume: unexpected status %d body=%s", patchW.Code, patchW.Body.String())
+	}
+	var patchResp WorkspaceResponse
+	if err := json.Unmarshal(patchW.Body.Bytes(), &patchResp); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	if patchResp.Workspace.Status != WorkspaceStatusActive {
+		t.Fatalf("expected active, got %s", patchResp.Workspace.Status)
+	}
+}
+
+func TestPatchWorkspace_InvalidStatus(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"invalid test","output_goal":"goal"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var createResp WorkspaceResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	wsID := createResp.Workspace.ID
+
+	patchBody := []byte(`{"status":"banana"}`)
+	patchReq, _ := http.NewRequest(http.MethodPatch, "/api/v1/workspaces/"+wsID, bytes.NewBuffer(patchBody))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchW := httptest.NewRecorder()
+	r.ServeHTTP(patchW, patchReq)
+	if patchW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", patchW.Code)
+	}
+}
+
 func TestGetWorkspaceReturnsActiveStatus(t *testing.T) {
 	r, _ := newTestRouterWithDomain()
 

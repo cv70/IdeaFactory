@@ -26,6 +26,7 @@ func RegisterRoutes(router *gin.RouterGroup, domain *ExplorationDomain) {
 	{
 		v1.POST("/workspaces", domain.ApiV1CreateWorkspace)
 		v1.GET("/workspaces/:workspaceID", domain.ApiV1GetWorkspace)
+		v1.PATCH("/workspaces/:workspaceID", domain.ApiV1PatchWorkspace)
 		v1.POST("/workspaces/:workspaceID/runs", domain.ApiV1CreateRun)
 		v1.GET("/workspaces/:workspaceID/runs/:runID", domain.ApiV1GetRun)
 		v1.GET("/workspaces/:workspaceID/projection", domain.ApiV1GetProjection)

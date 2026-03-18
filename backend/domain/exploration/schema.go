@@ -300,6 +300,10 @@ type UpdateStrategyReq struct {
 	PreferredBranchID *string `json:"preferred_branch_id"`
 }
 
+type PatchWorkspaceReq struct {
+	Status string `json:"status" binding:"required"`
+}
+
 type WorkspaceSummary struct {
 	ID         string `json:"id"`
 	Topic      string `json:"topic"`

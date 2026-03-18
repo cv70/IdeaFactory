@@ -39,6 +39,59 @@ func (d *ExplorationDomain) ApiV1GetWorkspace(c *gin.Context) {
 	c.JSON(http.StatusOK, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration, dbState)})
 }
 
+func (d *ExplorationDomain) ApiV1PatchWorkspace(c *gin.Context) {
+	workspaceID := c.Param("workspaceID")
+	var req PatchWorkspaceReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeV1Error(c, http.StatusBadRequest, "invalid_argument", "failed to parse patch request")
+		return
+	}
+
+	switch req.Status {
+	case "paused", "active":
+	default:
+		writeV1Error(c, http.StatusBadRequest, "invalid_argument", "status must be 'paused' or 'active'")
+		return
+	}
+
+	snapshot, ok := d.GetWorkspace(workspaceID)
+	if !ok {
+		writeV1Error(c, http.StatusNotFound, "not_found", "workspace not found")
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	var dbState *dbdao.WorkspaceState
+	if req.Status == "paused" {
+		now := time.Now()
+		if d.DB != nil {
+			if err := d.DB.PauseWorkspaceState(workspaceID); err != nil {
+				writeV1Error(c, http.StatusInternalServerError, "internal", "failed to pause workspace")
+				return
+			}
+			dbState, _ = d.DB.GetWorkspaceState(workspaceID)
+		}
+		// In no-DB mode, construct a synthetic dbState so the response reflects "paused".
+		if dbState == nil {
+			dbState = &dbdao.WorkspaceState{PausedAt: &now}
+		}
+		d.pauseScheduler(workspaceID)
+	} else {
+		if d.DB != nil {
+			if err := d.DB.ResumeWorkspaceState(workspaceID); err != nil {
+				writeV1Error(c, http.StatusInternalServerError, "internal", "failed to resume workspace")
+				return
+			}
+		}
+		// Start a run immediately; subsequent runs will use IntervalMs from strategy.
+		d.triggerRun(ctx, workspaceID, "resume")
+		dbState = nil // PausedAt is nil → status = active
+	}
+
+	c.JSON(http.StatusOK, WorkspaceResponse{Workspace: toWorkspaceView(snapshot.Exploration, dbState)})
+}
+
 func toWorkspaceView(session ExplorationSession, dbState *dbdao.WorkspaceState) WorkspaceView {
 	constraints := []string{}
 	if strings.TrimSpace(session.Constraints) != "" {
