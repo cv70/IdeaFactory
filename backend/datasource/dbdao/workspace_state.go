@@ -16,6 +16,7 @@ type WorkspaceState struct {
 	LastRunRound        int        `json:"last_run_round"`
 	LastCompactedAt     time.Time  `json:"last_compacted_at"`
 	ArchivedAt          *time.Time `json:"archived_at" gorm:"index"`
+	PausedAt            *time.Time `json:"paused_at" gorm:"index"`
 	Snapshot            string     `json:"snapshot" gorm:"type:text"`
 }
 
@@ -65,4 +66,32 @@ func (d *DB) ArchiveWorkspaceState(workspaceID string) error {
 		Model(&WorkspaceState{}).
 		Where("workspace_id = ?", workspaceID).
 		Update("archived_at", &now).Error
+}
+
+func (d *DB) PauseWorkspaceState(workspaceID string) error {
+	now := time.Now()
+	return d.DB().
+		Model(&WorkspaceState{}).
+		Where("workspace_id = ?", workspaceID).
+		Update("paused_at", &now).Error
+}
+
+func (d *DB) ResumeWorkspaceState(workspaceID string) error {
+	return d.DB().
+		Model(&WorkspaceState{}).
+		Where("workspace_id = ?", workspaceID).
+		Update("paused_at", gorm.Expr("NULL")).Error
+}
+
+func (d *DB) ListActiveWorkspaceStates(limit int) ([]WorkspaceState, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var states []WorkspaceState
+	err := d.DB().
+		Where("archived_at IS NULL AND paused_at IS NULL").
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&states).Error
+	return states, err
 }
