@@ -27,6 +27,12 @@ func (d *ExplorationDomain) persistWorkspace(session ExplorationSession) {
 		LastRunRound:        len(session.Runs),
 		Snapshot:            string(raw),
 	}
+	// Preserve PausedAt and ArchivedAt — these are managed by PauseWorkspaceState /
+	// ArchiveWorkspaceState and must not be clobbered by a full Save().
+	if existing, err2 := d.DB.GetWorkspaceState(session.ID); err2 == nil && existing != nil {
+		state.PausedAt = existing.PausedAt
+		state.ArchivedAt = existing.ArchivedAt
+	}
 	_ = d.DB.UpsertWorkspaceState(state)
 }
 
