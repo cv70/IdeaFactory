@@ -543,6 +543,67 @@ func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 	}})
 }
 
+// triggerRun creates a new run for the workspace and launches runAgentCycle in a goroutine.
+// If a cycle is already running (AgentRunning==true), it returns the existing run ID with launched=false.
+// Must be called while NOT holding runtime.mu or store.mu.
+func (d *ExplorationDomain) triggerRun(ctx context.Context, workspaceID string, source string) (runID string, launched bool) {
+	snapshot, ok := d.GetWorkspace(workspaceID)
+	if !ok {
+		return "", false
+	}
+	session := snapshot.Exploration
+
+	// Build plan outside lock (deterministic, no I/O).
+	plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, &RuntimeWorkspaceState{})
+
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		if state.AgentRunning {
+			if len(state.Runs) > 0 {
+				runID = state.Runs[len(state.Runs)-1].ID
+			}
+			return
+		}
+		now := time.Now()
+		runID = fmt.Sprintf("run-%s-%d", workspaceID, now.UnixNano())
+		run := Run{
+			ID:          runID,
+			WorkspaceID: workspaceID,
+			Source:      source,
+			Status:      RunStatusRunning,
+			StartedAt:   now.UnixMilli(),
+		}
+		state.Runs = append(state.Runs, run)
+		if state.Balance.WorkspaceID == "" {
+			state.Balance = buildInitialBalance(session, runID, now)
+		}
+		if plan != nil {
+			plan.RunID = runID
+			for i := range steps {
+				steps[i].RunID = runID
+			}
+			if len(state.Plans) > 0 {
+				plan.Version = state.Plans[len(state.Plans)-1].Version + 1
+			}
+			state.Plans = append(state.Plans, *plan)
+			state.PlanSteps = append(state.PlanSteps, steps...)
+		}
+		state.Mutations = append(state.Mutations, MutationEvent{
+			ID:          mutationID(workspaceID),
+			WorkspaceID: workspaceID,
+			Kind:        "run_created",
+			Run:         &GenerationRun{ID: runID},
+			CreatedAt:   now.UnixMilli(),
+		})
+		state.AgentRunning = true
+		launched = true
+	})
+
+	if launched {
+		go d.runAgentCycle(workspaceID)
+	}
+	return runID, launched
+}
+
 func subAgentForStep(index int) string {
 	switch index {
 	case 1:
