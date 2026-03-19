@@ -77,10 +77,8 @@ describe('applyExplorationMutations', () => {
       outputGoal: 'Research directions',
       constraints: 'Low-cost',
     })
-    const targetOpportunity = session.nodes.find((node) => node.type === 'opportunity' && node.id !== session.activeOpportunityId)
-    const targetIdea = session.nodes.find((node) => node.type === 'idea')
-    expect(targetOpportunity).toBeDefined()
-    expect(targetIdea).toBeDefined()
+    const targetOpportunityId = 'direction-manual'
+    const targetIdeaId = 'idea-manual'
 
     const next = applyExplorationMutations(session, [
       {
@@ -88,7 +86,7 @@ describe('applyExplorationMutations', () => {
         workspace_id: session.id,
         kind: 'active_opportunity_set',
         source: 'intervention',
-        active_opportunity_id: targetOpportunity!.id,
+        active_opportunity_id: targetOpportunityId,
         created_at: Date.now(),
       },
       {
@@ -96,13 +94,13 @@ describe('applyExplorationMutations', () => {
         workspace_id: session.id,
         kind: 'favorites_updated',
         source: 'intervention',
-        favorites: [targetIdea!.id],
+        favorites: [targetIdeaId],
         created_at: Date.now(),
       },
     ])
 
-    expect(next.activeOpportunityId).toBe(targetOpportunity!.id)
-    expect(next.favorites).toContain(targetIdea!.id)
+    expect(next.activeOpportunityId).toBe(targetOpportunityId)
+    expect(next.favorites).toContain(targetIdeaId)
   })
 
   it('applies strategy update mutation', () => {

@@ -1,7 +1,66 @@
 import { useEffect, useState } from 'react'
-import type { Node, WorkbenchView } from '../types/exploration'
+import type { AgentRunEvent, Node, WorkbenchView } from '../types/exploration'
 import type { RuntimeStrategy } from '../types/exploration'
 import { useTranslation } from '../lib/i18n'
+
+type TranslateFn = ReturnType<typeof useTranslation>['t']
+
+function eventTypeLabel(eventType: string, t: TranslateFn) {
+  switch (eventType) {
+    case 'agent_start':
+      return t('sidebar.agentLog.eventTypeStart')
+    case 'agent_delegate':
+      return t('sidebar.agentLog.eventTypeDelegate')
+    case 'tool_call':
+      return t('sidebar.agentLog.eventTypeTool')
+    case 'run_summary':
+      return t('sidebar.agentLog.eventTypeSummary')
+    case 'run_error':
+      return t('sidebar.agentLog.eventTypeError')
+    default:
+      return eventType
+  }
+}
+
+function eventTypeClassName(eventType: string) {
+  switch (eventType) {
+    case 'agent_start':
+      return 'agentEventTagStart'
+    case 'agent_delegate':
+      return 'agentEventTagDelegate'
+    case 'tool_call':
+      return 'agentEventTagTool'
+    case 'run_summary':
+      return 'agentEventTagSummary'
+    case 'run_error':
+      return 'agentEventTagError'
+    default:
+      return ''
+  }
+}
+
+function eventDetail(event: AgentRunEvent) {
+  if (event.event_type !== 'tool_call') return ''
+  const argsSummary = event.payload?.args_summary
+  return typeof argsSummary === 'string' ? argsSummary : ''
+}
+
+function formatEventTime(createdAt: number) {
+  return new Date(createdAt).toISOString().slice(11, 19) + 'Z'
+}
+
+function groupEventsByRun(events: AgentRunEvent[]) {
+  return events.reduce<Array<{ runId: string; events: AgentRunEvent[] }>>((groups, event) => {
+    const runId = event.run_id || 'unknown'
+    const currentGroup = groups[groups.length - 1]
+    if (currentGroup && currentGroup.runId === runId) {
+      currentGroup.events.push(event)
+      return groups
+    }
+    groups.push({ runId, events: [event] })
+    return groups
+  }, [])
+}
 
 type SidebarPanelProps = {
   savedIdeas: Node[]
@@ -13,6 +72,7 @@ type SidebarPanelProps = {
     createdAt: number
     strategy: RuntimeStrategy
   }>
+  agentEvents: AgentRunEvent[]
   onUpdateStrategy: (strategy: {
     interval_ms?: number
     max_runs?: number
@@ -80,6 +140,8 @@ export function SidebarPanel(props: SidebarPanelProps) {
       preferred_branch_id: undefined,
     })
   }
+
+  const groupedAgentEvents = groupEventsByRun(props.agentEvents)
 
   return (
     <aside className="sidebarPanel">
@@ -271,8 +333,55 @@ export function SidebarPanel(props: SidebarPanelProps) {
             <article key={run.id} className="runCard">
               <p className="detailLabel">{t('sidebar.runs.roundPrefix')} {run.round}</p>
               <p>{run.summary}</p>
+              {run.timeline && run.timeline.length > 0 ? (
+                <div className="timelineRow" aria-label="Runtime timeline">
+                  {run.timeline.map((step) => (
+                    <span key={`${run.id}-${step}`} className="timelineChip">
+                      {step}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="sidebarSection">
+        <p className="sectionLabel">{t('sidebar.agentLog.label')}</p>
+        <h2>{t('sidebar.agentLog.title')}</h2>
+        <div className="stackList">
+          {props.agentEvents.length === 0 ? (
+            <p className="emptyState">{t('sidebar.agentLog.empty')}</p>
+          ) : (
+            groupedAgentEvents.map((group) => (
+              <div key={group.runId} className="agentEventGroup">
+                <p className="detailLabel agentEventGroupLabel">
+                  {t('sidebar.agentLog.runPrefix')} {group.runId}
+                </p>
+                <div className="stackList">
+                  {group.events.map((event) => (
+                    <article key={event.id} className="runCard agentEventCard">
+                      <div className="agentEventHeader">
+                        <span className={`agentEventTag ${eventTypeClassName(event.event_type)}`}>
+                          {eventTypeLabel(event.event_type, t)}
+                        </span>
+                        <p className="detailLabel">
+                          {event.actor}
+                          {event.target ? ` -> ${event.target}` : ''}
+                        </p>
+                        <span className="agentEventTime">{formatEventTime(event.created_at)}</span>
+                      </div>
+                      <p>{event.summary}</p>
+                      {eventDetail(event) ? (
+                        <p className="agentEventDetail">{eventDetail(event)}</p>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
     </aside>

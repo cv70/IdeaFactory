@@ -21,22 +21,28 @@ func NewDB(ctx context.Context, c *config.DatabaseConfig) (*dbdao.DB, error) {
 		_ = db.Migrator().DropTable(
 			"workspace_runtime_states",
 			&dbdao.RuntimeBalanceRecord{},
-			&dbdao.RuntimeTaskResultRecord{},
-			&dbdao.RuntimeAgentTaskRecord{},
-			&dbdao.RuntimeRunRecord{},
+			"runtime_task_result_records",
+			"runtime_agent_task_records",
+			"runtime_run_records",
 			&dbdao.GraphEdge{},
 			&dbdao.GraphNode{},
 			&dbdao.WorkspaceState{},
 		)
 	}
+	if db.Migrator().HasTable("runtime_task_result_records") {
+		_ = db.Migrator().DropTable("runtime_task_result_records")
+	}
+	if db.Migrator().HasTable("runtime_agent_task_records") {
+		_ = db.Migrator().DropTable("runtime_agent_task_records")
+	}
+	if db.Migrator().HasTable("runtime_run_records") {
+		_ = db.Migrator().DropTable("runtime_run_records")
+	}
 	db.AutoMigrate(
-		&dbdao.ExplorationSession{},
 		&dbdao.GraphNode{},
 		&dbdao.GraphEdge{},
 		&dbdao.WorkspaceState{},
-		&dbdao.RuntimeRunRecord{},
-		&dbdao.RuntimeAgentTaskRecord{},
-		&dbdao.RuntimeTaskResultRecord{},
+		&dbdao.AgentRunRecord{},
 		&dbdao.RuntimeBalanceRecord{},
 		&dbdao.InterventionEvent{},
 		&dbdao.MutationLog{},

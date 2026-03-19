@@ -8,42 +8,6 @@ import (
 	"time"
 )
 
-type branchBlueprint struct {
-	Slug       string
-	Label      string
-	Summary    string
-	Question   string
-	Hypothesis string
-	Ideas      []string
-}
-
-var branchBlueprints = []branchBlueprint{
-	{
-		Slug:       "friction",
-		Label:      "Learning friction",
-		Summary:    "Trace the places where the current experience breaks down.",
-		Question:   "Where does the current journey stall or become too expensive to sustain?",
-		Hypothesis: "Reducing setup cost and feedback delay will unlock more participation.",
-		Ideas:      []string{"Lightweight pilot loop", "Feedback checkpoint pack"},
-	},
-	{
-		Slug:       "measurement",
-		Label:      "Measurable outcomes",
-		Summary:    "Frame the problem around signals that can be tested quickly.",
-		Question:   "Which outcome can be observed in a short cycle without overfitting?",
-		Hypothesis: "Smaller, better-instrumented experiments will surface clearer signals.",
-		Ideas:      []string{"Outcome-first tracker", "Fast validation protocol"},
-	},
-	{
-		Slug:       "adoption",
-		Label:      "Adoption wedge",
-		Summary:    "Find an entry point where the topic becomes easy to try and share.",
-		Question:   "What narrow entry point would make the topic immediately usable?",
-		Hypothesis: "A sharper entry wedge creates stronger pull than broader feature coverage.",
-		Ideas:      []string{"Single-scenario launch kit", "Peer distribution loop"},
-	},
-}
-
 func defaultRuntimeStrategy() RuntimeStrategy {
 	return RuntimeStrategy{
 		IntervalMs:    4000,
@@ -155,68 +119,7 @@ func createWorkspace(workspaceID string, req CreateWorkspaceReq) ExplorationSess
 
 	nodes := []Node{topicNode}
 	edges := []Edge{}
-
-	for idx, branch := range branchBlueprints {
-		branchID := fmt.Sprintf("opportunity-%s-%d", branch.Slug, idx+1)
-		opportunity := makeNode(
-			workspaceID,
-			branchID,
-			NodeOpportunity,
-			fmt.Sprintf("%s for %s", branch.Label, topic),
-			fmt.Sprintf("%s Optimized for %s.", branch.Summary, firstNonEmpty(outputGoal, "open-ended exploration")),
-			1,
-			"",
-		)
-		question := makeNode(
-			workspaceID,
-			branchID,
-			NodeQuestion,
-			fmt.Sprintf("%s: %s", topic, branch.Question),
-			fmt.Sprintf("Question path focused on %s.", strings.ToLower(branch.Label)),
-			2,
-			"",
-		)
-		hypothesis := makeNode(
-			workspaceID,
-			branchID,
-			NodeHypothesis,
-			branch.Hypothesis,
-			fmt.Sprintf("Hypothesis shaped by %s.", firstNonEmpty(constraints, "default exploration constraints")),
-			3,
-			"",
-		)
-
-		nodes = append(nodes, opportunity, question, hypothesis)
-		edges = append(edges,
-			makeEdge(topicNode.ID, opportunity.ID, EdgeRefines),
-			makeEdge(opportunity.ID, question.ID, EdgeSupports),
-			makeEdge(question.ID, hypothesis.ID, EdgeLeadsTo),
-		)
-
-		for ideaIdx, idea := range branch.Ideas {
-			ideaNode := makeNode(
-				workspaceID,
-				branchID,
-				NodeIdea,
-				fmt.Sprintf("%s: %s", idea, topic),
-				fmt.Sprintf(
-					"A concrete idea generated from %s for %s.",
-					strings.ToLower(branch.Label),
-					firstNonEmpty(outputGoal, "general exploration"),
-				),
-				4,
-				fmt.Sprintf("idea-%d", ideaIdx+1),
-			)
-			nodes = append(nodes, ideaNode)
-			edges = append(edges, makeEdge(hypothesis.ID, ideaNode.ID, EdgeLeadsTo))
-		}
-	}
-
-	opportunities := filterNodesByType(nodes, NodeOpportunity)
 	activeOpportunityID := topicNode.ID
-	if len(opportunities) > 0 {
-		activeOpportunityID = opportunities[0].ID
-	}
 	strategy := normalizeRuntimeStrategy(req.Strategy)
 
 	return ExplorationSession{
@@ -234,7 +137,7 @@ func createWorkspace(workspaceID string, req CreateWorkspaceReq) ExplorationSess
 				ID:      "run-1",
 				Round:   1,
 				Focus:   activeOpportunityID,
-				Summary: fmt.Sprintf("Mapped %s into %d initial opportunity branches.", topic, len(opportunities)),
+				Summary: "Initialized workspace with topic anchor; waiting for agent-driven graph growth.",
 			},
 		},
 	}

@@ -15,7 +15,7 @@ import (
 // 返回:
 //   - adk.Agent: 制品代理实例。
 //   - error: 如果创建过程中发生错误。
-func NewArtifactAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.Agent, error) {
+func NewArtifactAgent(ctx context.Context, cm model.ToolCallingChatModel, handlers []adk.ChatModelAgentMiddleware) (adk.Agent, error) {
 	// 使用聊天模型创建制品代理
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "ArtifactAgent",
@@ -23,5 +23,6 @@ func NewArtifactAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.A
 		Instruction:   "Produce compact high-signal artifact output for idea exploration progress.",
 		Model:         cm,
 		MaxIterations: 6,
+		Handlers:      handlers,
 	})
 }

@@ -15,7 +15,7 @@ import (
 // 返回:
 //   - adk.Agent: 通用代理实例。
 //   - error: 如果创建过程中发生错误。
-func NewGeneralAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.Agent, error) {
+func NewGeneralAgent(ctx context.Context, cm model.ToolCallingChatModel, handlers []adk.ChatModelAgentMiddleware) (adk.Agent, error) {
 	// 使用聊天模型创建通用代理
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          "GeneralAgent",
@@ -23,5 +23,6 @@ func NewGeneralAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.Ag
 		Instruction:   "Provide pragmatic, concise completion for generic exploration tasks.",
 		Model:         cm,
 		MaxIterations: 6,
+		Handlers:      handlers,
 	})
 }

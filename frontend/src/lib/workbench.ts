@@ -7,33 +7,6 @@ import type {
   WorkbenchView,
 } from '../types/exploration'
 
-const BRANCH_BLUEPRINTS = [
-  {
-    slug: 'friction',
-    label: 'Learning friction',
-    summary: 'Trace the places where the current experience breaks down.',
-    question: 'Where does the current journey stall or become too expensive to sustain?',
-    hypothesis: 'Reducing setup cost and feedback delay will unlock more participation.',
-    ideas: ['Lightweight pilot loop', 'Feedback checkpoint pack'],
-  },
-  {
-    slug: 'measurement',
-    label: 'Measurable outcomes',
-    summary: 'Frame the problem around signals that can be tested quickly.',
-    question: 'Which outcome can be observed in a short cycle without overfitting?',
-    hypothesis: 'Smaller, better-instrumented experiments will surface clearer signals.',
-    ideas: ['Outcome-first tracker', 'Fast validation protocol'],
-  },
-  {
-    slug: 'adoption',
-    label: 'Adoption wedge',
-    summary: 'Find an entry point where the topic becomes easy to try and share.',
-    question: 'What narrow entry point would make the topic immediately usable?',
-    hypothesis: 'A sharper entry wedge creates stronger pull than broader feature coverage.',
-    ideas: ['Single-scenario launch kit', 'Peer distribution loop'],
-  },
-] as const
-
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
@@ -92,64 +65,13 @@ export function createExplorationSession(input: ExplorationInput): ExplorationSe
 
   const nodes: Node[] = [topicNode]
   const edges: Edge[] = []
-
-  BRANCH_BLUEPRINTS.forEach((branch, index) => {
-    const branchId = `opportunity-${branch.slug}-${index + 1}`
-    const opportunity = makeNode(
-      sessionId,
-      branchId,
-      'opportunity',
-      `${branch.label} for ${topic}`,
-      `${branch.summary} Optimized for ${outputGoal || 'open-ended exploration'}.`,
-      1,
-    )
-    const question = makeNode(
-      sessionId,
-      branchId,
-      'question',
-      `${topic}: ${branch.question}`,
-      `Question path focused on ${branch.label.toLowerCase()}.`,
-      2,
-    )
-    const hypothesis = makeNode(
-      sessionId,
-      branchId,
-      'hypothesis',
-      branch.hypothesis,
-      `Hypothesis shaped by ${constraints || 'default exploration constraints'}.`,
-      3,
-    )
-
-    nodes.push(opportunity, question, hypothesis)
-    edges.push(
-      makeEdge(topicNode.id, opportunity.id, 'refines'),
-      makeEdge(opportunity.id, question.id, 'supports'),
-      makeEdge(question.id, hypothesis.id, 'leads_to'),
-    )
-
-    branch.ideas.forEach((idea, ideaIndex) => {
-      const ideaNode = makeNode(
-        sessionId,
-        branchId,
-        'idea',
-        `${idea}: ${topic}`,
-        `A concrete idea generated from ${branch.label.toLowerCase()} for ${outputGoal || 'general exploration'}.`,
-        4,
-        `idea-${ideaIndex + 1}`,
-      )
-      nodes.push(ideaNode)
-      edges.push(makeEdge(hypothesis.id, ideaNode.id, 'leads_to'))
-    })
-  })
-
-  const opportunities = nodes.filter((node) => node.type === 'opportunity')
-  const activeOpportunityId = opportunities[0]?.id ?? topicNode.id
+  const activeOpportunityId = topicNode.id
 
   const initialRun: GenerationRun = {
     id: 'run-1',
     round: 1,
     focus: activeOpportunityId,
-    summary: `Mapped ${topic} into ${opportunities.length} initial opportunity branches.`,
+    summary: 'Initialized workspace with topic anchor; waiting for agent-driven graph growth.',
   }
 
   return {

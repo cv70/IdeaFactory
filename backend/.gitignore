@@ -1,0 +1,3 @@
+config/idea_factory_config.yaml
+*.db
+*.exe

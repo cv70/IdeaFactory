@@ -4,10 +4,12 @@ import (
 	"backend/agentools"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
@@ -48,7 +50,73 @@ func newScriptedExplorationDomain(replies ...string) *ExplorationDomain {
 		},
 	}
 	domain.GraphAppendTool = agentools.NewAppendGraphBatchTool(domain)
+	domain.DeepAgent = &scriptedResumableAgent{
+		runFn: func(ctx context.Context, input *adk.AgentInput) *adk.AsyncIterator[*adk.AgentEvent] {
+			iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+			go func() {
+				defer gen.Close()
+
+				msg, err := domain.Model.Generate(ctx, []*schema.Message{schema.UserMessage("run exploration cycle")})
+				if err != nil {
+					gen.Send(&adk.AgentEvent{Err: err})
+					return
+				}
+
+				output := struct {
+					Summary string                           `json:"summary"`
+					Nodes   []agentools.AppendGraphBatchNode `json:"nodes"`
+					Edges   []agentools.AppendGraphBatchEdge `json:"edges"`
+				}{}
+				if msg != nil && strings.TrimSpace(msg.Content) != "" {
+					if err := json.Unmarshal([]byte(msg.Content), &output); err != nil {
+						gen.Send(&adk.AgentEvent{Err: fmt.Errorf("decode scripted graph batch: %w", err)})
+						return
+					}
+				}
+
+				workspaceID := ""
+				if len(input.Messages) > 0 {
+					workspaceID = extractWorkspaceIDFromPrompt(input.Messages[0].Content)
+				}
+				if workspaceID == "" && len(domain.store.workspaces) == 1 {
+					for id := range domain.store.workspaces {
+						workspaceID = id
+					}
+				}
+
+				if workspaceID != "" && (len(output.Nodes) > 0 || len(output.Edges) > 0) {
+					result, err := domain.AppendGraphBatch(ctx, agentools.AppendGraphBatchParams{
+						WorkspaceID: workspaceID,
+						Nodes:       output.Nodes,
+						Edges:       output.Edges,
+					})
+					if err != nil {
+						gen.Send(&adk.AgentEvent{Err: err})
+						return
+					}
+					output.Summary = result.Summary
+				}
+				summary := strings.TrimSpace(output.Summary)
+				if summary == "" {
+					summary = "no graph changes were needed this run"
+				}
+				gen.Send(adk.EventFromMessage(schema.AssistantMessage("SUMMARY: "+summary, nil), nil, schema.Assistant, ""))
+			}()
+			return iter
+		},
+	}
 	return domain
+}
+
+func extractWorkspaceIDFromPrompt(prompt string) string {
+	for _, line := range strings.Split(prompt, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- workspace_id:") {
+			continue
+		}
+		return strings.TrimSpace(strings.TrimPrefix(line, "- workspace_id:"))
+	}
+	return ""
 }
 
 func TestAppendGraphBatchToolRejectsInvalidEdgeEndpoint(t *testing.T) {

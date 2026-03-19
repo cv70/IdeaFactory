@@ -2,6 +2,7 @@ package exploration
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -19,13 +20,38 @@ func buildTraceSummary(workspaceID string, runID string, state RuntimeStateSnaps
 			},
 		})
 	}
+	for _, event := range state.Events {
+		category := "tool"
+		switch event.EventType {
+		case "agent_start", "run_summary", "run_error":
+			category = "run"
+		case "agent_delegate":
+			category = "tool"
+		case "tool_call":
+			category = "tool"
+		}
+		resp.Items = append(resp.Items, TraceSummaryItem{
+			ID:        "event-" + event.ID,
+			Timestamp: toRFC3339(event.CreatedAt),
+			Level:     "info",
+			Category:  category,
+			Message:   event.Summary,
+			RelatedIDs: []string{
+				event.RunID,
+			},
+		})
+	}
 	for _, result := range state.Results {
+		message := result.Summary
+		if len(result.Timeline) > 0 {
+			message = fmt.Sprintf("%s [timeline: %s]", message, strings.Join(result.Timeline, " -> "))
+		}
 		resp.Items = append(resp.Items, TraceSummaryItem{
 			ID:        "tool-" + result.TaskID,
 			Timestamp: toRFC3339(result.UpdatedAt),
 			Level:     "info",
 			Category:  "tool",
-			Message:   result.Summary,
+			Message:   message,
 			RelatedIDs: []string{
 				result.TaskID,
 			},

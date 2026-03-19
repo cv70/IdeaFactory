@@ -17,14 +17,15 @@ import (
 // 返回:
 //   - adk.Agent: 图代理实例。
 //   - error: 如果创建过程中发生错误。
-func NewGraphAgent(ctx context.Context, cm model.ToolCallingChatModel, graphTools ...tool.BaseTool) (adk.Agent, error) {
+func NewGraphAgent(ctx context.Context, cm model.ToolCallingChatModel, handlers []adk.ChatModelAgentMiddleware, graphTools ...tool.BaseTool) (adk.Agent, error) {
 	// 使用聊天模型创建图代理
 	config := &adk.ChatModelAgentConfig{
 		Name:          "GraphAgent",
 		Description:   "Transform evidence into graph-oriented structure and decisions.",
-		Instruction:   "Structure findings into clear nodes, relations, and decision candidates. Use append_graph_batch to mutate the graph instead of describing abstract edits.",
+		Instruction:   "Structure findings into the smallest useful set of new nodes, relations, and decision candidates for this run. Use append_graph_batch to mutate the graph instead of describing abstract edits. Prefer one concrete append batch over broad planning prose.",
 		Model:         cm,
 		MaxIterations: 6,
+		Handlers:      handlers,
 	}
 	if len(graphTools) > 0 {
 		config.ToolsConfig = adk.ToolsConfig{

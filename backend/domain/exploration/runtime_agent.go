@@ -1,13 +1,14 @@
 package exploration
 
 import (
+	"backend/agents"
 	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino-examples/adk/multiagent/deep/utils"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -67,6 +68,7 @@ func (d *ExplorationDomain) QueryRuntimeState(workspaceID string, query RuntimeS
 			Runs:               append([]Run{}, state.Runs...),
 			AgentTasks:         append([]AgentTask{}, state.AgentTasks...),
 			Results:            append([]AgentTaskResultSummary{}, state.Results...),
+			Events:             append([]AgentRunEvent{}, state.Events...),
 			Mutations:          append([]MutationEvent{}, state.Mutations...),
 			Balance:            state.Balance,
 			LatestReplanReason: state.ReplanReason,
@@ -98,6 +100,7 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 		Runs:               []Run{},
 		AgentTasks:         []AgentTask{},
 		Results:            []AgentTaskResultSummary{},
+		Events:             []AgentRunEvent{},
 		Mutations:          []MutationEvent{},
 		LatestReplanReason: snapshot.LatestReplanReason,
 	}
@@ -120,6 +123,11 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 	for _, result := range snapshot.Results {
 		if _, ok := taskIDs[result.TaskID]; ok {
 			out.Results = append(out.Results, result)
+		}
+	}
+	for _, event := range snapshot.Events {
+		if _, ok := runIDs[event.RunID]; ok {
+			out.Events = append(out.Events, event)
 		}
 	}
 
@@ -201,6 +209,7 @@ func (d *ExplorationDomain) restoreRuntimeState(workspaceID string) bool {
 		state.Runs = append([]Run{}, snapshot.Runs...)
 		state.AgentTasks = append([]AgentTask{}, snapshot.AgentTasks...)
 		state.Results = append([]AgentTaskResultSummary{}, snapshot.Results...)
+		state.Events = append([]AgentRunEvent{}, snapshot.Events...)
 		state.Balance = snapshot.Balance
 		state.ReplanReason = snapshot.LatestReplanReason
 	})
@@ -359,15 +368,23 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 		stateCopy.ReplanReason = state.ReplanReason
 	})
 
-	summary, runErr := d.runMainAgentGraphBatch(context.Background(), workspaceID, &sessionCopy, &stateCopy)
+	cycleResult, runErr := d.runMainAgentCycle(context.Background(), workspaceID, &sessionCopy, &stateCopy)
 
 	now := time.Now().UnixMilli()
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		summary := cycleResult.Summary
 		if summary == "" {
 			summary = "main agent completed without graph changes"
 		}
 		taskID := fmt.Sprintf("main-agent-%s-%d", workspaceID, now)
 		isSuccess := runErr == nil
+		subAgent := cycleResult.LeadActor
+		if strings.TrimSpace(subAgent) == "" {
+			subAgent = string(RuntimeActorMainAgent)
+		}
+		if subAgent != string(RuntimeActorMainAgent) {
+			summary = fmt.Sprintf("%s led this run: %s", subAgent, summary)
+		}
 		if runErr != nil {
 			summary = runErr.Error()
 		}
@@ -375,23 +392,32 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 			ID:          taskID,
 			WorkspaceID: workspaceID,
 			RunID:       latestRunID(state.Runs),
-			SubAgent:    string(RuntimeActorMainAgent),
-			Goal:        MainAgentGraphGoal,
+			SubAgent:    subAgent,
+			Goal:        MainAgentCycleGoal,
 			Status:      RuntimeTaskDone,
 			UpdatedAt:   now,
 		})
 		state.Results = append(state.Results, AgentTaskResultSummary{
 			TaskID:    taskID,
 			Summary:   summary,
+			Timeline:  cycleResult.Timeline,
 			IsSuccess: isSuccess,
 			UpdatedAt: now,
 		})
 	})
+	d.persistAgentRunEvents(cycleResult.Events)
 }
 
-func (d *ExplorationDomain) runMainAgentGraphBatch(ctx context.Context, workspaceID string, session *ExplorationSession, state *RuntimeWorkspaceState) (string, error) {
+type mainAgentCycleResult struct {
+	Summary   string
+	LeadActor string
+	Timeline  []string
+	Events    []AgentRunEvent
+}
+
+func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID string, session *ExplorationSession, state *RuntimeWorkspaceState) (mainAgentCycleResult, error) {
 	if d.DeepAgent == nil {
-		return "main agent completed without graph changes", nil
+		return mainAgentCycleResult{Summary: "main agent completed without graph changes"}, nil
 	}
 	iter := d.DeepAgent.Run(ctx, &adk.AgentInput{
 		Messages: []adk.Message{
@@ -400,28 +426,139 @@ func (d *ExplorationDomain) runMainAgentGraphBatch(ctx context.Context, workspac
 	})
 
 	lastAssistantMessage := ""
+	agentActivity := map[string]int{}
+	lastAgentActivityAt := map[string]int{}
+	activityIndex := 0
+	timeline := make([]string, 0, 4)
+	events := make([]AgentRunEvent, 0, 8)
+	rootAgent := d.DeepAgent.Name(ctx)
+	runID := latestRunID(state.Runs)
 	for event, ok := iter.Next(); ok; event, ok = iter.Next() {
 		if event == nil {
 			continue
 		}
 		if event.Err != nil {
-			return "", event.Err
+			events = append(events, AgentRunEvent{
+				ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+				WorkspaceID: workspaceID,
+				RunID:       runID,
+				RootAgent:   rootAgent,
+				EventType:   "run_error",
+				Actor:       string(RuntimeActorMainAgent),
+				Summary:     event.Err.Error(),
+				CreatedAt:   time.Now().UnixMilli(),
+			})
+			return mainAgentCycleResult{Events: events}, event.Err
 		}
-		if event.Output == nil || event.Output.MessageOutput == nil {
+		if event.Output == nil {
 			continue
+		}
+		if runtimeEvent, ok := event.Output.CustomizedOutput.(agents.RuntimeEvent); ok {
+			payload := runtimeEvent.Payload
+			if runtimeEvent.EventType == agents.RuntimeEventAgentStart {
+				if payload == nil {
+					payload = map[string]any{}
+				}
+				if len(state.Runs) > 0 {
+					payload["source"] = state.Runs[len(state.Runs)-1].Source
+				}
+			}
+			events = append(events, AgentRunEvent{
+				ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+				WorkspaceID: workspaceID,
+				RunID:       runID,
+				RootAgent:   rootAgent,
+				EventType:   runtimeEvent.EventType,
+				Actor:       runtimeEvent.Actor,
+				Target:      runtimeEvent.Target,
+				Summary:     runtimeEvent.Summary,
+				Payload:     payload,
+				CreatedAt:   time.Now().UnixMilli(),
+			})
+		}
+		if event.Output.MessageOutput == nil {
+			continue
+		}
+		activityIndex++
+		if actor := normalizeLeadAgentName(event.AgentName); actor != "" {
+			agentActivity[actor]++
+			lastAgentActivityAt[actor] = activityIndex
+			timeline = appendTimelineStep(timeline, actor)
 		}
 		if event.Output.MessageOutput.Role != schema.Assistant {
 			continue
 		}
 		msg, err := event.Output.MessageOutput.GetMessage()
 		if err != nil {
-			return "", err
+			return mainAgentCycleResult{}, err
 		}
 		if msg != nil && strings.TrimSpace(msg.Content) != "" {
 			lastAssistantMessage = msg.Content
 		}
 	}
-	return parseMainAgentSummary(lastAssistantMessage), nil
+	result := mainAgentCycleResult{
+		Summary:   parseMainAgentSummary(lastAssistantMessage),
+		LeadActor: selectLeadAgent(agentActivity, lastAgentActivityAt),
+		Timeline:  appendSummaryStep(timeline, lastAssistantMessage),
+		Events:    events,
+	}
+	result.Events = append(result.Events, AgentRunEvent{
+		ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		RootAgent:   rootAgent,
+		EventType:   "run_summary",
+		Actor:       firstNonEmpty(result.LeadActor, string(RuntimeActorMainAgent)),
+		Summary:     result.Summary,
+		Payload: map[string]any{
+			"lead_actor": result.LeadActor,
+			"timeline":   result.Timeline,
+		},
+		CreatedAt: time.Now().UnixMilli(),
+	})
+	return result, nil
+}
+
+func appendTimelineStep(timeline []string, step string) []string {
+	step = strings.TrimSpace(step)
+	if step == "" {
+		return timeline
+	}
+	if len(timeline) > 0 && timeline[len(timeline)-1] == step {
+		return timeline
+	}
+	return append(timeline, step)
+}
+
+func appendSummaryStep(timeline []string, lastAssistantMessage string) []string {
+	if strings.Contains(strings.TrimSpace(lastAssistantMessage), "SUMMARY:") {
+		return appendTimelineStep(timeline, "SUMMARY")
+	}
+	return timeline
+}
+
+func normalizeLeadAgentName(name string) string {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "", "exploration-main-agent", string(RuntimeActorMainAgent):
+		return ""
+	default:
+		return name
+	}
+}
+
+func selectLeadAgent(activity map[string]int, lastSeen map[string]int) string {
+	bestName := ""
+	bestCount := 0
+	bestLastSeen := -1
+	for name, count := range activity {
+		if count > bestCount || (count == bestCount && lastSeen[name] > bestLastSeen) {
+			bestName = name
+			bestCount = count
+			bestLastSeen = lastSeen[name]
+		}
+	}
+	return bestName
 }
 
 func parseMainAgentSummary(content string) string {

@@ -4,7 +4,7 @@ import type {
   ExplorationPayload,
   FeedbackRequest,
 } from '../types/api'
-import type { Edge, ExplorationMutation, ExplorationSession, Node } from '../types/exploration'
+import type { AgentRunEvent, Edge, ExplorationMutation, ExplorationSession, Node } from '../types/exploration'
 import type { WorkspaceStatus } from '../types/workspace'
 import { buildWorkbenchView, createExplorationSession, expandOpportunity, materializeOpportunity, toggleFavoriteIdea } from './workbench'
 import { createMockExplorationRepository } from './mockExplorationRepository'
@@ -88,8 +88,14 @@ type V1ProjectionResponse = {
       focus?: string
       status?: string
     }
-    recent_changes?: Array<{ summary?: string }>
+    recent_changes?: Array<{ summary?: string; timeline?: string[] }>
   }
+}
+
+type V1TraceEventsResponse = {
+  workspace_id: string
+  run_id?: string
+  events?: AgentRunEvent[]
 }
 
 async function requestSnapshot(
@@ -164,6 +170,7 @@ function toPayloadFromV1(workspace: V1WorkspaceResponse['workspace'], projection
     nodes[0]?.id ??
     ''
   const recentSummary = projection.recent_changes?.[projection.recent_changes.length - 1]?.summary
+  const recentTimeline = projection.recent_changes?.[projection.recent_changes.length - 1]?.timeline
   const session: ExplorationSession = {
     id: workspace.id,
     topic: workspace.topic,
@@ -180,6 +187,7 @@ function toPayloadFromV1(workspace: V1WorkspaceResponse['workspace'], projection
           round: 1,
           focus: activeOpportunityId,
           summary: recentSummary ?? `Run status: ${projection.run_summary.status ?? 'completed'}`,
+          timeline: recentTimeline,
         }]
       : [],
   }
@@ -267,6 +275,14 @@ export async function getExploration(explorationId: string) {
 
   const payload = payloadFor(explorationId)
   return delay(payload ? success(payload) : notFound())
+}
+
+export async function getTraceEvents(explorationId: string) {
+  const traceResp = await requestV1<V1TraceEventsResponse>(`/workspaces/${explorationId}/trace/events?limit=20`, { method: 'GET' })
+  if (traceResp && traceResp.status === 200) {
+    return traceResp.data.events ?? []
+  }
+  return []
 }
 
 export async function expandOpportunityRequest(explorationId: string, opportunityId: string) {

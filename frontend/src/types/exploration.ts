@@ -56,6 +56,20 @@ export type GenerationRun = {
   round: number
   focus: string
   summary: string
+  timeline?: string[]
+}
+
+export type AgentRunEvent = {
+  id: string
+  workspace_id: string
+  run_id: string
+  root_agent: string
+  event_type: string
+  actor: string
+  target?: string
+  summary: string
+  payload?: Record<string, unknown>
+  created_at: number
 }
 
 export type RuntimeStrategy = {

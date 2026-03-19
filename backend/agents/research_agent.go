@@ -18,7 +18,7 @@ import (
 // 返回:
 //   - adk.Agent: 研究代理实例。
 //   - error: 如果创建过程中发生错误。
-func NewResearchAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.Agent, error) {
+func NewResearchAgent(ctx context.Context, cm model.ToolCallingChatModel, handlers []adk.ChatModelAgentMiddleware) (adk.Agent, error) {
 	// 创建DuckDuckGo文本搜索工具
 	searchTool, err := duckduckgo.NewTextSearchTool(ctx, &duckduckgo.Config{})
 	if err != nil {
@@ -31,6 +31,7 @@ func NewResearchAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.A
 		Description: "Collect evidence and external signals for current exploration directions.",
 		Instruction: "Focus on collecting credible evidence and summarize key findings briefly.",
 		Model:       cm,
+		Handlers:    handlers,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: []tool.BaseTool{searchTool},

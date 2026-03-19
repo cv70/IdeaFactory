@@ -195,53 +195,12 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	if !ok {
 		return
 	}
-
-	projection := dbdao.RuntimeStateProjection{
-		WorkspaceID: workspaceDBID,
-		Runs:        make([]dbdao.RuntimeRunRecord, 0, len(snapshot.Runs)),
-		AgentTasks:  make([]dbdao.RuntimeAgentTaskRecord, 0, len(snapshot.AgentTasks)),
-		Results:     make([]dbdao.RuntimeTaskResultRecord, 0, len(snapshot.Results)),
-	}
-	for _, item := range snapshot.Runs {
-		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
-		if err != nil {
-			itemWorkspaceID = workspaceDBID
-		}
-		projection.Runs = append(projection.Runs, dbdao.RuntimeRunRecord{
-			WorkspaceID: itemWorkspaceID,
-			Source:      item.Source,
-			Status:      string(item.Status),
-			StartedAt:   item.StartedAt,
-			EndedAt:     item.EndedAt,
-		})
-	}
-	for _, item := range snapshot.AgentTasks {
-		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
-		if err != nil {
-			itemWorkspaceID = workspaceDBID
-		}
-		projection.AgentTasks = append(projection.AgentTasks, dbdao.RuntimeAgentTaskRecord{
-			WorkspaceID: itemWorkspaceID,
-			RunID:       item.RunID,
-			SubAgent:    item.SubAgent,
-			Goal:        item.Goal,
-			Status:      string(item.Status),
-		})
-	}
-	for _, item := range snapshot.Results {
-		projection.Results = append(projection.Results, dbdao.RuntimeTaskResultRecord{
-			TaskID:      item.TaskID,
-			WorkspaceID: workspaceDBID,
-			Summary:     item.Summary,
-			IsSuccess:   item.IsSuccess,
-		})
-	}
 	if snapshot.Balance.WorkspaceID != "" {
 		balanceWorkspaceID, err := parseWorkspaceID(snapshot.Balance.WorkspaceID)
 		if err != nil {
 			balanceWorkspaceID = workspaceDBID
 		}
-		projection.Balance = &dbdao.RuntimeBalanceRecord{
+		balance := &dbdao.RuntimeBalanceRecord{
 			WorkspaceID:        balanceWorkspaceID,
 			RunID:              snapshot.Balance.RunID,
 			Divergence:         snapshot.Balance.Divergence,
@@ -251,8 +210,11 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 			UpdatedAtMs:        snapshot.Balance.UpdatedAt,
 			LatestReplanReason: snapshot.LatestReplanReason,
 		}
+		_ = d.DB.DB().
+			Where("workspace_id = ?", balanceWorkspaceID).
+			Delete(&dbdao.RuntimeBalanceRecord{}).Error
+		_ = d.DB.DB().Create(balance).Error
 	}
-	_ = d.DB.ReplaceWorkspaceRuntimeProjection(projection)
 }
 
 func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSnapshot, bool) {
@@ -263,57 +225,188 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 	if err != nil {
 		return RuntimeStateSnapshot{}, false
 	}
-	projection, err := d.DB.LoadWorkspaceRuntimeProjection(workspaceDBID)
-	if err == nil && projection != nil && len(projection.Runs) > 0 {
-		out := RuntimeStateSnapshot{
-			Runs:               make([]Run, 0, len(projection.Runs)),
-			AgentTasks:         make([]AgentTask, 0, len(projection.AgentTasks)),
-			Results:            make([]AgentTaskResultSummary, 0, len(projection.Results)),
-			LatestReplanReason: projection.LatestReplanReason,
+	records, err := d.DB.ListAgentRunRecords(workspaceDBID)
+	if err != nil {
+		return RuntimeStateSnapshot{}, false
+	}
+	out := buildRuntimeStateFromAgentRunRecords(formatWorkspaceID(workspaceDBID), records)
+
+	var balance dbdao.RuntimeBalanceRecord
+	err = d.DB.DB().Where("workspace_id = ?", workspaceDBID).First(&balance).Error
+	if err == nil {
+		out.Balance = BalanceState{
+			WorkspaceID: formatWorkspaceID(balance.WorkspaceID),
+			RunID:       balance.RunID,
+			Divergence:  balance.Divergence,
+			Research:    balance.Research,
+			Aggression:  balance.Aggression,
+			Reason:      balance.Reason,
+			UpdatedAt:   balance.UpdatedAtMs,
 		}
-		for _, item := range projection.Runs {
+		out.LatestReplanReason = balance.LatestReplanReason
+	}
+	if len(out.Runs) == 0 && out.Balance.WorkspaceID == "" {
+		return RuntimeStateSnapshot{}, false
+	}
+	return out, true
+}
+
+func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.AgentRunRecord) RuntimeStateSnapshot {
+	out := RuntimeStateSnapshot{
+		Runs:       []Run{},
+		AgentTasks: []AgentTask{},
+		Results:    []AgentTaskResultSummary{},
+		Events:     []AgentRunEvent{},
+	}
+	runIndex := map[string]int{}
+	runTimelines := map[string][]string{}
+	for _, record := range records {
+		var payload map[string]any
+		if strings.TrimSpace(record.Payload) != "" {
+			_ = json.Unmarshal([]byte(record.Payload), &payload)
+		}
+		event := AgentRunEvent{
+			ID:          strconv.FormatUint(uint64(record.ID), 10),
+			WorkspaceID: formatWorkspaceID(record.WorkspaceID),
+			RunID:       record.RunID,
+			RootAgent:   record.RootAgent,
+			EventType:   record.EventType,
+			Actor:       record.Actor,
+			Target:      record.Target,
+			Summary:     record.Summary,
+			Payload:     payload,
+			CreatedAt:   record.CreatedAt.UnixMilli(),
+		}
+		out.Events = append(out.Events, event)
+
+		idx, ok := runIndex[record.RunID]
+		if !ok {
 			out.Runs = append(out.Runs, Run{
-				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
-				Source:      item.Source,
-				Status:      RunStatus(item.Status),
-				StartedAt:   item.StartedAt,
-				EndedAt:     item.EndedAt,
+				ID:          record.RunID,
+				WorkspaceID: workspaceID,
+				Status:      RunStatusRunning,
+				StartedAt:   record.CreatedAt.UnixMilli(),
 			})
+			idx = len(out.Runs) - 1
+			runIndex[record.RunID] = idx
 		}
-		for _, item := range projection.AgentTasks {
+		run := &out.Runs[idx]
+		switch record.EventType {
+		case "agent_start":
+			if source, _ := payload["source"].(string); source != "" {
+				run.Source = source
+			}
+		case "agent_delegate":
+			if record.Target != "" {
+				runTimelines[record.RunID] = appendTimelineValue(runTimelines[record.RunID], record.Target)
+			}
+		case "tool_call":
+			if record.Actor != "" {
+				runTimelines[record.RunID] = appendTimelineValue(runTimelines[record.RunID], record.Actor)
+			}
+		case "run_summary":
+			run.Status = RunStatusCompleted
+			run.EndedAt = record.CreatedAt.UnixMilli()
+			leadActor, _ := payload["lead_actor"].(string)
+			timeline := append([]string{}, runTimelines[record.RunID]...)
+			if len(timeline) == 0 && leadActor != "" {
+				timeline = append(timeline, leadActor)
+			}
+			timeline = appendTimelineValue(timeline, "SUMMARY")
+			taskID := "summary-" + strconv.FormatUint(uint64(record.ID), 10)
+			subAgent := firstNonEmpty(leadActor, record.Actor)
+			if subAgent == "" {
+				subAgent = string(RuntimeActorMainAgent)
+			}
 			out.AgentTasks = append(out.AgentTasks, AgentTask{
-				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
-				RunID:       item.RunID,
-				SubAgent:    item.SubAgent,
-				Goal:        item.Goal,
-				Status:      RuntimeTaskStatus(item.Status),
-				UpdatedAt:   item.UpdatedAt.UnixMilli(),
+				ID:          taskID,
+				WorkspaceID: workspaceID,
+				RunID:       record.RunID,
+				SubAgent:    subAgent,
+				Goal:        MainAgentCycleGoal,
+				Status:      RuntimeTaskDone,
+				UpdatedAt:   record.CreatedAt.UnixMilli(),
 			})
-		}
-		for _, item := range projection.Results {
 			out.Results = append(out.Results, AgentTaskResultSummary{
-				TaskID:    item.TaskID,
-				Summary:   item.Summary,
-				IsSuccess: item.IsSuccess,
-				UpdatedAt: item.UpdatedAt.UnixMilli(),
+				TaskID:    taskID,
+				Summary:   record.Summary,
+				Timeline:  timeline,
+				IsSuccess: true,
+				UpdatedAt: record.CreatedAt.UnixMilli(),
+			})
+		case "run_error":
+			run.Status = RunStatusFailed
+			run.EndedAt = record.CreatedAt.UnixMilli()
+			taskID := "error-" + strconv.FormatUint(uint64(record.ID), 10)
+			out.AgentTasks = append(out.AgentTasks, AgentTask{
+				ID:          taskID,
+				WorkspaceID: workspaceID,
+				RunID:       record.RunID,
+				SubAgent:    firstNonEmpty(record.Actor, string(RuntimeActorMainAgent)),
+				Goal:        MainAgentCycleGoal,
+				Status:      RuntimeTaskFailed,
+				UpdatedAt:   record.CreatedAt.UnixMilli(),
+			})
+			out.Results = append(out.Results, AgentTaskResultSummary{
+				TaskID:    taskID,
+				Summary:   record.Summary,
+				Timeline:  appendTimelineValue(runTimelines[record.RunID], "ERROR"),
+				IsSuccess: false,
+				UpdatedAt: record.CreatedAt.UnixMilli(),
 			})
 		}
-		if projection.Balance != nil {
-			out.Balance = BalanceState{
-				WorkspaceID: formatWorkspaceID(projection.Balance.WorkspaceID),
-				RunID:       projection.Balance.RunID,
-				Divergence:  projection.Balance.Divergence,
-				Research:    projection.Balance.Research,
-				Aggression:  projection.Balance.Aggression,
-				Reason:      projection.Balance.Reason,
-				UpdatedAt:   projection.Balance.UpdatedAtMs,
+	}
+	return out
+}
+
+func appendTimelineValue(values []string, next string) []string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return values
+	}
+	if len(values) > 0 && values[len(values)-1] == next {
+		return values
+	}
+	return append(values, next)
+}
+
+func (d *ExplorationDomain) persistAgentRunEvents(events []AgentRunEvent) {
+	if d.DB == nil || len(events) == 0 {
+		return
+	}
+	records := make([]dbdao.AgentRunRecord, 0, len(events))
+	for _, event := range events {
+		workspaceDBID, err := parseWorkspaceID(event.WorkspaceID)
+		if err != nil {
+			continue
+		}
+		payloadRaw := ""
+		if len(event.Payload) > 0 {
+			raw, _ := json.Marshal(event.Payload)
+			payloadRaw = string(raw)
+		}
+		record := dbdao.AgentRunRecord{
+			Model: gorm.Model{
+				CreatedAt: time.UnixMilli(event.CreatedAt),
+				UpdatedAt: time.UnixMilli(event.CreatedAt),
+			},
+			WorkspaceID: workspaceDBID,
+			RunID:       event.RunID,
+			RootAgent:   event.RootAgent,
+			EventType:   event.EventType,
+			Actor:       event.Actor,
+			Target:      event.Target,
+			Summary:     event.Summary,
+			Payload:     payloadRaw,
+		}
+		if event.ID != "" {
+			if parsedID, convErr := strconv.ParseUint(event.ID, 10, 64); convErr == nil {
+				record.ID = uint(parsedID)
 			}
 		}
-		return out, true
+		records = append(records, record)
 	}
-	return RuntimeStateSnapshot{}, false
+	_ = d.DB.AppendAgentRunRecords(records)
 }
 
 func (d *ExplorationDomain) persistIntervention(workspaceID string, req InterventionReq) {

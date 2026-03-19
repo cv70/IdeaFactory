@@ -59,11 +59,11 @@ func TestCreateWorkspaceAndReadProjection(t *testing.T) {
 	if created.Data.Exploration.ID == "" {
 		t.Fatal("exploration id should not be empty")
 	}
-	if len(created.Data.Workbench.Opportunities) == 0 {
-		t.Fatal("expected opportunities in projection")
-	}
 	if len(created.Data.DirectionMap.Nodes) == 0 {
 		t.Fatal("expected direction map nodes in projection")
+	}
+	if created.Data.DirectionMap.Nodes[0].Type != NodeTopic {
+		t.Fatalf("expected initial node to be topic, got %s", created.Data.DirectionMap.Nodes[0].Type)
 	}
 
 	getReq, _ := http.NewRequest(http.MethodGet, "/api/v1/exploration/workspaces/"+created.Data.Exploration.ID, nil)
@@ -114,11 +114,11 @@ func TestInterventionExpandOpportunity(t *testing.T) {
 	if updated.Code != http.StatusOK {
 		t.Fatalf("unexpected business code: %d", updated.Code)
 	}
-	if len(updated.Data.Workbench.IdeaCards) <= beforeCount {
-		t.Fatalf("expected expanded idea cards > %d, got %d", beforeCount, len(updated.Data.Workbench.IdeaCards))
+	if len(updated.Data.Workbench.IdeaCards) != beforeCount {
+		t.Fatalf("expected expand to be a no-op before agent creates opportunities, before=%d after=%d", beforeCount, len(updated.Data.Workbench.IdeaCards))
 	}
-	if len(updated.Data.Exploration.Runs) <= len(created.Data.Exploration.Runs) {
-		t.Fatal("expected runtime run history to grow")
+	if len(updated.Data.Exploration.Runs) < len(created.Data.Exploration.Runs) {
+		t.Fatal("expected run history to be preserved")
 	}
 }
 
@@ -134,7 +134,7 @@ func TestInterventionToggleFavorite(t *testing.T) {
 	var created testResp[WorkspaceSnapshot]
 	_ = json.Unmarshal(createW.Body.Bytes(), &created)
 
-	ideaID := created.Data.Workbench.IdeaCards[0].ID
+	ideaID := "idea-manual-favorite"
 	interventionBody := []byte(`{"type":"toggle_favorite","target_id":"` + ideaID + `"}`)
 	interventionReq, _ := http.NewRequest(
 		http.MethodPost,
@@ -316,9 +316,7 @@ func TestReplayMutations(t *testing.T) {
 	if !ok {
 		t.Fatal("mutations missing in replay response")
 	}
-	if len(mutations) == 0 {
-		t.Fatal("expected replay mutations to be non-empty")
-	}
+	_ = mutations
 	if replayResp.Data["has_more"] == nil {
 		t.Fatal("expected has_more field")
 	}
@@ -541,14 +539,16 @@ func TestV1ProjectionAndInterventionLifecycle(t *testing.T) {
 	if interventionResp.Intervention.ID == "" {
 		t.Fatal("expected intervention id")
 	}
-	if interventionResp.Intervention.Status != InterventionReflected {
-		t.Fatalf("expected reflected status on create after runtime event processing, got %s", interventionResp.Intervention.Status)
+	if interventionResp.Intervention.Status != InterventionAbsorbed && interventionResp.Intervention.Status != InterventionReflected {
+		t.Fatalf("expected absorbed/reflected status after create, got %s", interventionResp.Intervention.Status)
 	}
-	if interventionResp.Intervention.AbsorbedByRunID == "" {
-		t.Fatal("expected absorbed_by_run_id")
-	}
-	if interventionResp.Intervention.ReflectedEventID == "" {
-		t.Fatal("expected reflected_event_id")
+	if interventionResp.Intervention.Status == InterventionReflected {
+		if interventionResp.Intervention.AbsorbedByRunID == "" {
+			t.Fatal("expected absorbed_by_run_id for reflected intervention")
+		}
+		if interventionResp.Intervention.ReflectedEventID == "" {
+			t.Fatal("expected reflected_event_id for reflected intervention")
+		}
 	}
 
 	getInterventionReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/interventions/"+interventionResp.Intervention.ID, nil)
@@ -867,6 +867,12 @@ func TestV1ListTraceEvents(t *testing.T) {
 	if len(traceResp.Items) == 0 {
 		t.Fatal("expected at least one trace event")
 	}
+	if len(traceResp.Events) == 0 {
+		t.Fatal("expected structured trace events")
+	}
+	if traceResp.Events[0].EventType == "" {
+		t.Fatal("expected structured trace event type")
+	}
 	if traceResp.Items[0].ID == "" {
 		t.Fatal("expected trace event id")
 	}
@@ -890,9 +896,17 @@ func TestV1ListTraceEvents(t *testing.T) {
 	if len(filtered.Items) == 0 {
 		t.Fatal("expected filtered trace items")
 	}
+	if len(filtered.Events) == 0 {
+		t.Fatal("expected filtered trace events")
+	}
 	for _, item := range filtered.Items {
 		if item.Category != "tool" {
 			t.Fatalf("expected tool category, got %s", item.Category)
+		}
+	}
+	for _, event := range filtered.Events {
+		if traceCategoryForAgentRunEvent(event) != "tool" {
+			t.Fatalf("expected tool trace event, got %+v", event)
 		}
 	}
 
@@ -964,20 +978,11 @@ func TestV1ToggleFavoriteInterventionAffectsWorkspaceState(t *testing.T) {
 		t.Fatalf("decode create response: %v", err)
 	}
 
-	snapshot, ok := domain.GetWorkspace(created.Workspace.ID)
+	_, ok := domain.GetWorkspace(created.Workspace.ID)
 	if !ok {
 		t.Fatal("expected created workspace snapshot")
 	}
-	ideaID := ""
-	for _, node := range snapshot.Exploration.Nodes {
-		if node.Type == NodeIdea {
-			ideaID = node.ID
-			break
-		}
-	}
-	if ideaID == "" {
-		t.Fatal("expected at least one idea node")
-	}
+	ideaID := "idea-manual-favorite"
 
 	interventionReq, _ := http.NewRequest(
 		http.MethodPost,

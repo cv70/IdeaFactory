@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -125,6 +126,10 @@ func (d *ExplorationDomain) ApiV1ListTraceEvents(c *gin.Context) {
 		return
 	}
 	full := buildTraceSummary(workspaceID, runID, state).Items
+	fullEvents := append([]AgentRunEvent{}, state.Events...)
+	if len(fullEvents) == 0 {
+		fullEvents = buildTraceEventsFromRuntimeState(state)
+	}
 	if category != "" {
 		filtered := make([]TraceSummaryItem, 0, len(full))
 		for _, item := range full {
@@ -133,6 +138,13 @@ func (d *ExplorationDomain) ApiV1ListTraceEvents(c *gin.Context) {
 			}
 		}
 		full = filtered
+		eventFiltered := make([]AgentRunEvent, 0, len(fullEvents))
+		for _, event := range fullEvents {
+			if traceCategoryForAgentRunEvent(event) == category {
+				eventFiltered = append(eventFiltered, event)
+			}
+		}
+		fullEvents = eventFiltered
 	}
 	if level != "" {
 		filtered := make([]TraceSummaryItem, 0, len(full))
@@ -144,6 +156,7 @@ func (d *ExplorationDomain) ApiV1ListTraceEvents(c *gin.Context) {
 		full = filtered
 	}
 	items, nextCursor, hasMore := applyTracePagination(full, cursor, limit)
+	events, _, _ := applyAgentRunEventPagination(fullEvents, cursor, limit)
 	if len(items) == 0 {
 		writeV1Error(c, http.StatusNotFound, "not_found", "trace events not found")
 		return
@@ -152,9 +165,79 @@ func (d *ExplorationDomain) ApiV1ListTraceEvents(c *gin.Context) {
 		WorkspaceID: workspaceID,
 		RunID:       runID,
 		Items:       items,
+		Events:      events,
 		NextCursor:  nextCursor,
 		HasMore:     hasMore,
 	})
+}
+
+func traceCategoryForAgentRunEvent(event AgentRunEvent) string {
+	switch event.EventType {
+	case "agent_start", "run_summary", "run_error":
+		return "run"
+	case "agent_delegate", "tool_call":
+		return "tool"
+	default:
+		return "tool"
+	}
+}
+
+func buildTraceEventsFromRuntimeState(state RuntimeStateSnapshot) []AgentRunEvent {
+	events := make([]AgentRunEvent, 0, len(state.Results)+len(state.Runs))
+	for _, run := range state.Runs {
+		events = append(events, AgentRunEvent{
+			ID:        "run-" + run.ID,
+			RunID:     run.ID,
+			EventType: "agent_start",
+			Actor:     string(RuntimeActorMainAgent),
+			Summary:   "run started",
+			CreatedAt: run.StartedAt,
+		})
+	}
+	for _, result := range state.Results {
+		events = append(events, AgentRunEvent{
+			ID:        "result-" + result.TaskID,
+			RunID:     "",
+			EventType: "tool_call",
+			Actor:     string(RuntimeActorMainAgent),
+			Summary:   result.Summary,
+			Payload: map[string]any{
+				"timeline": result.Timeline,
+			},
+			CreatedAt: result.UpdatedAt,
+		})
+	}
+	return events
+}
+
+func applyAgentRunEventPagination(events []AgentRunEvent, cursor string, limit int) ([]AgentRunEvent, string, bool) {
+	if len(events) == 0 {
+		return events, "", false
+	}
+	start := 0
+	if cursor != "" {
+		cTime, cID, ok := parseOrderedCursor(cursor)
+		if ok {
+			start = len(events)
+			for i := range events {
+				evTime := time.UnixMilli(events[i].CreatedAt)
+				if evTime.After(cTime) || (evTime.Equal(cTime) && events[i].ID > cID) {
+					start = i
+					break
+				}
+			}
+		}
+	}
+	if start >= len(events) {
+		return []AgentRunEvent{}, "", false
+	}
+	filtered := events[start:]
+	if len(filtered) <= limit {
+		return filtered, "", false
+	}
+	page := filtered[:limit]
+	last := page[len(page)-1]
+	return page, buildOrderedCursor(time.UnixMilli(last.CreatedAt), last.ID), true
 }
 
 func normalizeRunStatus(status RunStatus) string {

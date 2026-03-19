@@ -7,10 +7,10 @@ import (
 
 func (d *ExplorationDomain) buildMainAgentGraphPrompt(session *ExplorationSession, state *RuntimeWorkspaceState) string {
 	return fmt.Sprintf(
-		`You are the MainAgent for IdeaFactory.
+		`You are the exploration runtime coordinator for IdeaFactory.
 
-Your job is to decide the next append-only graph mutation for the workspace.
-The backend will execute %q exactly once with your batch. Do not rewrite existing nodes or edges.
+Run the agent system for this workspace now. You may coordinate specialist subagents, but the final responsibility is yours.
+Grow the graph only when the current workspace state justifies it, and use %q for every graph mutation. Do not rewrite existing nodes or edges outside that tool.
 
 Workspace:
 - workspace_id: %s
@@ -27,45 +27,23 @@ Current graph summary:
 - recent_nodes: %s
 
 Rules:
-1. Return JSON only.
-2. Use append-only mutations.
-3. Node types must be one of: %s
-4. Edge types must be one of: %s
-5. Node status must be one of: %s
-6. Edge endpoints must reference an existing node id or a node created in the same batch.
-7. If no change is warranted, return {"summary":"no changes","nodes":[],"edges":[]}
+1. Use append-only mutations.
+2. Node types must be one of: %s
+3. Edge types must be one of: %s
+4. Node status must be one of: %s
+5. Edge endpoints must reference an existing node id or a node created in the same batch.
+6. Prefer GraphAgent for graph growth and graph-structure decisions.
+7. Use ResearchAgent only when an evidence gap blocks a concrete graph mutation right now.
+8. Use ArtifactAgent only when packaging a concise result helps complete this run.
+9. Keep work tight: make only the smallest useful graph growth for this run.
+10. If no change is warranted, do not force a tool call.
+11. When the run is complete, your final assistant message must be exactly one line in this format:
+   SUMMARY: <brief result of this run>
 
-Return this exact shape:
-{
-  "summary": "short reason for this append batch",
-  "nodes": [
-    {
-      "id": "string",
-      "type": "string",
-      "title": "string",
-      "summary": "string",
-      "status": "active",
-      "score": 0.0,
-      "depth": 0,
-      "parent_context": "string",
-      "metadata": {
-        "branchId": "string",
-        "slot": "string",
-        "cluster": "string"
-      },
-      "evidence_summary": "string"
-    }
-  ],
-  "edges": [
-    {
-      "id": "string",
-      "from": "string",
-      "to": "string",
-      "type": "string"
-    }
-  ]
-}`,
-		MainAgentGraphGoal,
+Examples:
+- SUMMARY: append_graph_batch added 1 node and 1 edge for the active branch
+- SUMMARY: no graph changes were needed this run`,
+		MainAgentCycleGoal,
 		session.ID,
 		session.Topic,
 		firstNonEmpty(session.OutputGoal, "none"),

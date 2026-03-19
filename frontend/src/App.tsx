@@ -14,6 +14,7 @@ import {
   createExploration,
   expandOpportunity as expandOpportunityRequest,
   getExploration,
+  getTraceEvents,
   listWorkspaces,
   patchWorkspaceStatus,
   replayExplorationMutations,
@@ -23,7 +24,7 @@ import {
 } from './lib/explorationApi'
 import { applyExplorationMutations } from './lib/mutations'
 import { buildWorkbenchView } from './lib/workbench'
-import type { ExplorationMutation, ExplorationSession, Node, RuntimeStrategy } from './types/exploration'
+import type { AgentRunEvent, ExplorationMutation, ExplorationSession, Node, RuntimeStrategy } from './types/exploration'
 import type { WorkspaceRecord } from './types/workspace'
 
 type StrategyHistoryEntry = {
@@ -62,6 +63,7 @@ function App() {
   const [error, setError] = useState('')
   const mutationCursorRef = useRef('')
   const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([])
+  const [agentEvents, setAgentEvents] = useState<AgentRunEvent[]>([])
   const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceRecord[]>([])
   const [lastInterventionIntent, setLastInterventionIntent] = useState('')
   const [lastInterventionStatus, setLastInterventionStatus] = useState('')
@@ -158,10 +160,19 @@ function App() {
     let active = true
     let cleanup: (() => void) | undefined
 
+    const refreshAgentEvents = async () => {
+      const events = await getTraceEvents(exploration.id)
+      if (!active) return
+      setAgentEvents(events)
+    }
+
+    void refreshAgentEvents()
+
     subscribeExploration(exploration.id, {
       onSnapshot: (payload) => {
         if (!active) return
         setExploration(payload.exploration)
+        void refreshAgentEvents()
         setSelectedNodeId((current) => {
           if (!current) return payload.exploration.activeOpportunityId
           const exists = payload.exploration.nodes.some((node) => node.id === current)
@@ -171,6 +182,7 @@ function App() {
       onMutation: (mutations) => {
         if (!active) return
         mergeStrategyHistory(mutations)
+        void refreshAgentEvents()
         for (const mutation of mutations) {
           mutationCursorRef.current = toCursor(mutation.created_at, mutation.id)
         }
@@ -229,6 +241,7 @@ function App() {
     }
 
     setExploration(response.data.exploration)
+    setAgentEvents([])
     upsertWorkspaceHistory({
       id: response.data.exploration.id,
       topic: response.data.exploration.topic,
@@ -493,6 +506,7 @@ function App() {
 
         {view ? (
           <SidebarPanel
+            agentEvents={agentEvents}
             savedIdeas={savedIdeas}
             view={view}
             strategy={exploration?.strategy}

@@ -110,6 +110,118 @@ describe('idea factory app', () => {
     expect(screen.getByText('策略历史')).toBeInTheDocument()
   })
 
+  it('renders runtime timeline in recent run notes when available', async () => {
+    vi.spyOn(explorationApi, 'getTraceEvents').mockResolvedValueOnce([
+      {
+        id: 'evt-1',
+        workspace_id: 'ws-runtime',
+        run_id: 'run-1',
+        root_agent: 'exploration-main-agent',
+        event_type: 'agent_delegate',
+        actor: 'exploration-main-agent',
+        target: 'GraphAgent',
+        summary: 'exploration-main-agent delegated work to GraphAgent',
+        created_at: 1700000000000,
+      },
+      {
+        id: 'evt-2',
+        workspace_id: 'ws-runtime',
+        run_id: 'run-1',
+        root_agent: 'exploration-main-agent',
+        event_type: 'tool_call',
+        actor: 'GraphAgent',
+        target: 'append_graph_batch',
+        summary: 'GraphAgent called append_graph_batch',
+        payload: {
+          args_summary: 'branch=op-1, add 1 node',
+        },
+        created_at: 1700000001000,
+      },
+      {
+        id: 'evt-3',
+        workspace_id: 'ws-runtime',
+        run_id: 'run-1',
+        root_agent: 'exploration-main-agent',
+        event_type: 'run_summary',
+        actor: 'exploration-main-agent',
+        summary: 'Run completed with 1 new idea',
+        created_at: 1700000002000,
+      },
+      {
+        id: 'evt-4',
+        workspace_id: 'ws-runtime',
+        run_id: 'run-2',
+        root_agent: 'exploration-main-agent',
+        event_type: 'run_error',
+        actor: 'exploration-main-agent',
+        summary: 'Run 2 paused for review',
+        created_at: 1700000010000,
+      },
+    ])
+    vi.spyOn(explorationApi, 'createExploration').mockResolvedValueOnce({
+      code: 200,
+      data: {
+        exploration: {
+          id: 'ws-runtime',
+          topic: 'AI education',
+          outputGoal: 'Research directions',
+          constraints: 'Low-cost',
+          activeOpportunityId: 'op-1',
+          favorites: [],
+          edges: [],
+          nodes: [
+            {
+              id: 'op-1',
+              sessionId: 'ws-runtime',
+              type: 'opportunity',
+              title: 'Learning friction for AI education',
+              summary: 'Trace the main bottlenecks.',
+              status: 'active',
+              score: 0.8,
+              depth: 1,
+              metadata: { branchId: 'op-1' },
+              evidenceSummary: '',
+            },
+          ],
+          runs: [
+            {
+              id: 'run-1',
+              round: 1,
+              focus: 'op-1',
+              summary: 'GraphAgent led this run: append_graph_batch added 1 nodes and 1 edges',
+              timeline: ['ResearchAgent', 'GraphAgent', 'SUMMARY'],
+            },
+          ],
+        },
+        presentation: null,
+      },
+    })
+
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('主题'), { target: { value: 'AI education' } })
+    fireEvent.change(screen.getByLabelText('输出目标'), {
+      target: { value: 'Research directions' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '开始探索' }))
+
+    expect(await screen.findByText('ResearchAgent')).toBeInTheDocument()
+    expect(screen.getByText('GraphAgent')).toBeInTheDocument()
+    expect(screen.getByText('SUMMARY')).toBeInTheDocument()
+    expect(await screen.findByText('最近 Agent 事件')).toBeInTheDocument()
+    expect(screen.getByText('exploration-main-agent delegated work to GraphAgent')).toBeInTheDocument()
+    expect(screen.getByText('GraphAgent called append_graph_batch')).toBeInTheDocument()
+    expect(screen.getByText('委派')).toBeInTheDocument()
+    expect(screen.getByText('工具')).toBeInTheDocument()
+    expect(screen.getByText('总结')).toBeInTheDocument()
+    expect(screen.getByText('错误')).toBeInTheDocument()
+    expect(screen.getByText('branch=op-1, add 1 node')).toBeInTheDocument()
+    expect(screen.getByText('运行 run-1')).toBeInTheDocument()
+    expect(screen.getByText('运行 run-2')).toBeInTheDocument()
+    expect(screen.getByText('22:13:20Z')).toBeInTheDocument()
+    expect(screen.getByText('22:13:30Z')).toBeInTheDocument()
+  })
+
   it('switches between historical workspaces', async () => {
     render(<App />)
 

@@ -133,10 +133,24 @@ type AgentTask struct {
 }
 
 type AgentTaskResultSummary struct {
-	TaskID    string `json:"task_id"`
-	Summary   string `json:"summary"`
-	IsSuccess bool   `json:"is_success"`
-	UpdatedAt int64  `json:"updated_at"`
+	TaskID    string   `json:"task_id"`
+	Summary   string   `json:"summary"`
+	Timeline  []string `json:"timeline,omitempty"`
+	IsSuccess bool     `json:"is_success"`
+	UpdatedAt int64    `json:"updated_at"`
+}
+
+type AgentRunEvent struct {
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspace_id"`
+	RunID       string         `json:"run_id"`
+	RootAgent   string         `json:"root_agent"`
+	EventType   string         `json:"event_type"`
+	Actor       string         `json:"actor"`
+	Target      string         `json:"target,omitempty"`
+	Summary     string         `json:"summary"`
+	Payload     map[string]any `json:"payload,omitempty"`
+	CreatedAt   int64          `json:"created_at"`
 }
 
 type BalanceState struct {
@@ -153,6 +167,7 @@ type RuntimeStateSnapshot struct {
 	Runs               []Run                    `json:"runs"`
 	AgentTasks         []AgentTask              `json:"agent_tasks"`
 	Results            []AgentTaskResultSummary `json:"results"`
+	Events             []AgentRunEvent          `json:"events,omitempty"`
 	Mutations          []MutationEvent          `json:"mutations,omitempty"`
 	Balance            BalanceState             `json:"balance"`
 	LatestReplanReason string                   `json:"latest_replan_reason,omitempty"`
@@ -352,8 +367,9 @@ type ProjectionView struct {
 }
 
 type ProjectionChange struct {
-	Type    string `json:"type"`
-	Summary string `json:"summary"`
+	Type     string   `json:"type"`
+	Summary  string   `json:"summary"`
+	Timeline []string `json:"timeline,omitempty"`
 }
 
 type ProjectionResponse struct {
@@ -414,6 +430,7 @@ type TraceEventsResponse struct {
 	WorkspaceID string             `json:"workspace_id"`
 	RunID       string             `json:"run_id,omitempty"`
 	Items       []TraceSummaryItem `json:"items"`
+	Events      []AgentRunEvent    `json:"events,omitempty"`
 	NextCursor  string             `json:"next_cursor,omitempty"`
 	HasMore     bool               `json:"has_more"`
 }

@@ -7,7 +7,7 @@ import {
 } from './workbench'
 
 describe('workbench domain helpers', () => {
-  it('creates an exploration session from user input', () => {
+  it('creates an exploration session with only a topic anchor', () => {
     const session = createExplorationSession({
       topic: 'AI education',
       outputGoal: 'research directions',
@@ -17,27 +17,20 @@ describe('workbench domain helpers', () => {
     expect(session.topic).toBe('AI education')
     expect(session.outputGoal).toBe('research directions')
     expect(session.constraints).toBe('low-cost, testable')
-    expect(session.nodes.some((node) => node.type === 'opportunity')).toBe(true)
+    expect(session.nodes).toHaveLength(1)
+    expect(session.nodes[0]?.type).toBe('topic')
+    expect(session.edges).toHaveLength(0)
+    expect(session.activeOpportunityId).toBe(session.nodes[0]?.id)
   })
 
-  it('builds a workbench view around the active opportunity branch', () => {
+  it('returns null workbench view until opportunities are created', () => {
     const session = createExplorationSession({
       topic: 'AI education',
       outputGoal: 'research directions',
       constraints: 'low-cost, testable',
     })
 
-    const target = session.nodes.find((node) => node.type === 'opportunity' && node.id !== session.activeOpportunityId)
-    expect(target).toBeDefined()
-
-    const view = buildWorkbenchView({
-      ...session,
-      activeOpportunityId: target!.id,
-    })
-
-    expect(view!.activeOpportunity.id).toBe(target!.id)
-    expect(view!.questionTrail.length).toBeGreaterThan(0)
-    expect(view!.ideaCards.length).toBeGreaterThan(0)
+    expect(buildWorkbenchView(session)).toBeNull()
   })
 
   it('expands an opportunity branch with additional ideas', () => {
@@ -47,12 +40,8 @@ describe('workbench domain helpers', () => {
       constraints: 'low-cost, testable',
     })
 
-    const initialView = buildWorkbenchView(session)
     const expanded = expandOpportunity(session, session.activeOpportunityId)
-    const nextView = buildWorkbenchView(expanded)
-
-    expect(nextView!.ideaCards.length).toBeGreaterThan(initialView!.ideaCards.length)
-    expect(expanded.runs.at(-1)?.focus).toContain(session.activeOpportunityId)
+    expect(expanded).toEqual(session)
   })
 
   it('toggles favorite ideas without breaking the workbench state', () => {
@@ -62,7 +51,7 @@ describe('workbench domain helpers', () => {
       constraints: 'low-cost, testable',
     })
 
-    const ideaId = buildWorkbenchView(session)!.ideaCards[0].id
+    const ideaId = 'idea-manual-favorite'
 
     const saved = toggleFavoriteIdea(session, ideaId)
     expect(saved.favorites).toContain(ideaId)

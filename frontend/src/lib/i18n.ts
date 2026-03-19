@@ -92,6 +92,15 @@ const translations = {
     'sidebar.runs.label': 'Runs',
     'sidebar.runs.title': 'Recent run notes',
     'sidebar.runs.roundPrefix': 'Round',
+    'sidebar.agentLog.label': 'Agent log',
+    'sidebar.agentLog.title': 'Recent agent events',
+    'sidebar.agentLog.empty': 'No agent events yet.',
+    'sidebar.agentLog.runPrefix': 'Run',
+    'sidebar.agentLog.eventTypeStart': 'Start',
+    'sidebar.agentLog.eventTypeDelegate': 'Delegate',
+    'sidebar.agentLog.eventTypeTool': 'Tool',
+    'sidebar.agentLog.eventTypeSummary': 'Summary',
+    'sidebar.agentLog.eventTypeError': 'Error',
 
     // Graph view
     'graph.expandButton': 'Expand branch',
@@ -188,6 +197,15 @@ const translations = {
     'sidebar.runs.label': '运行',
     'sidebar.runs.title': '最近运行记录',
     'sidebar.runs.roundPrefix': '第',
+    'sidebar.agentLog.label': 'Agent 日志',
+    'sidebar.agentLog.title': '最近 Agent 事件',
+    'sidebar.agentLog.empty': '暂无 Agent 事件。',
+    'sidebar.agentLog.runPrefix': '运行',
+    'sidebar.agentLog.eventTypeStart': '启动',
+    'sidebar.agentLog.eventTypeDelegate': '委派',
+    'sidebar.agentLog.eventTypeTool': '工具',
+    'sidebar.agentLog.eventTypeSummary': '总结',
+    'sidebar.agentLog.eventTypeError': '错误',
 
     // Graph view
     'graph.expandButton': '展开此分支',

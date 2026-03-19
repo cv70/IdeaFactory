@@ -39,7 +39,7 @@ const (
 	RunSourceWorkspaceRead   RunSource = "workspace_read"
 )
 
-const MainAgentGraphGoal = "grow graph through append_graph_batch"
+const MainAgentCycleGoal = "coordinate agent-driven graph growth through append_graph_batch"
 
 func validNodeTypes() []NodeType {
 	return []NodeType{

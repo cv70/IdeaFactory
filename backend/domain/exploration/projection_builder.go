@@ -33,8 +33,9 @@ func (d *ExplorationDomain) buildProjectionResponse(snapshot *WorkspaceSnapshot)
 	if state, ok := d.GetRuntimeState(snapshot.Exploration.ID); ok {
 		for _, item := range state.Results {
 			view.RecentChanges = append(view.RecentChanges, ProjectionChange{
-				Type:    "task_result",
-				Summary: item.Summary,
+				Type:     "task_result",
+				Summary:  item.Summary,
+				Timeline: append([]string{}, item.Timeline...),
 			})
 		}
 		if len(state.Runs) > 0 {

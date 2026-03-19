@@ -392,6 +392,109 @@ select:focus-visible {
   gap: 0.5rem;
 }
 
+.agentEventCard {
+  gap: 0.45rem;
+}
+
+.agentEventGroup {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.agentEventGroupLabel {
+  margin: 0;
+  padding-left: 0.15rem;
+}
+
+.agentEventHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.agentEventHeader .detailLabel {
+  margin: 0;
+}
+
+.agentEventTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.agentEventTagStart {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.18);
+  color: #166534;
+}
+
+.agentEventTagDelegate {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: #92400e;
+}
+
+.agentEventTagTool {
+  background: rgba(37, 99, 235, 0.11);
+  border-color: rgba(37, 99, 235, 0.18);
+  color: #1d4ed8;
+}
+
+.agentEventTagSummary {
+  background: rgba(124, 58, 237, 0.11);
+  border-color: rgba(124, 58, 237, 0.16);
+  color: #6d28d9;
+}
+
+.agentEventTagError {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.18);
+  color: #b91c1c;
+}
+
+.agentEventDetail {
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  border-radius: 12px;
+  background: rgba(23, 42, 92, 0.05);
+  border: 1px solid rgba(23, 42, 92, 0.08);
+  color: var(--muted-ink);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.agentEventTime {
+  margin-left: auto;
+  color: var(--muted-ink);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.timelineChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(34, 79, 186, 0.09);
+  border: 1px solid rgba(34, 79, 186, 0.14);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .emptyState {
   padding: 0.35rem 0;
   font-style: italic;
