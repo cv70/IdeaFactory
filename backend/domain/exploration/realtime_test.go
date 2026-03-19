@@ -5,7 +5,6 @@ import (
 	"backend/config"
 	"backend/infra"
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ func newTestExplorationDomain() *ExplorationDomain {
 	return ed
 }
 
-func TestRuntimeContinuouslyExpandsWorkspace(t *testing.T) {
+func TestRuntimeCanBeTriggeredForAdditionalRuns(t *testing.T) {
 	domain := newTestExplorationDomain()
 	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
@@ -35,16 +34,27 @@ func TestRuntimeContinuouslyExpandsWorkspace(t *testing.T) {
 		Constraints: "Low-cost",
 	})
 	mistake.Unwrap(err)
-	initialRuns := len(created.Exploration.Runs)
-
-	time.Sleep(4500 * time.Millisecond)
-
-	updated, ok := domain.GetWorkspace(created.Exploration.ID)
+	initialState, ok := domain.GetRuntimeState(created.Exploration.ID)
 	if !ok {
-		t.Fatal("workspace should exist")
+		t.Fatal("expected runtime state")
 	}
-	if len(updated.Exploration.Runs) <= initialRuns {
-		t.Fatalf("expected runtime to append runs, before=%d after=%d", initialRuns, len(updated.Exploration.Runs))
+	initialRuns := len(initialState.Runs)
+
+	runID, launched := domain.triggerRun(context.Background(), created.Exploration.ID, "manual")
+	if !launched {
+		t.Fatal("expected manual trigger to launch a run")
+	}
+	if runID == "" {
+		t.Fatal("expected run id")
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	updated, ok := domain.GetRuntimeState(created.Exploration.ID)
+	if !ok {
+		t.Fatal("expected runtime state after trigger")
+	}
+	if len(updated.Runs) <= initialRuns {
+		t.Fatalf("expected trigger to append runs, before=%d after=%d", initialRuns, len(updated.Runs))
 	}
 }
 
@@ -64,49 +74,15 @@ func TestRunPlanTaskPersistence(t *testing.T) {
 	if len(state.Runs) == 0 {
 		t.Fatal("expected at least one run")
 	}
-	if len(state.Plans) == 0 {
-		t.Fatal("expected at least one plan")
-	}
-	if len(state.PlanSteps) == 0 {
-		t.Fatal("expected at least one plan step")
-	}
 	if len(state.AgentTasks) == 0 {
-		t.Fatal("expected at least one agent task")
+		t.Fatal("expected at least one runtime activity record")
 	}
 	if state.Balance.WorkspaceID == "" {
 		t.Fatal("expected balance state")
 	}
 }
 
-func TestRuntimeContext(t *testing.T) {
-	ctx := context.Background()
-	ctx = InitRuntimeContext(ctx, RuntimeContextData{
-		WorkspaceID: "ws-1",
-		RunID:       "run-1",
-		PlanID:      "plan-1",
-		WorkDir:     "/tmp/idea-factory/ws-1/run-1",
-		InputDigest: "topic=ai",
-	})
-
-	got, ok := RuntimeContextFrom(ctx)
-	if !ok {
-		t.Fatal("expected runtime context to be available")
-	}
-	if got.RunID != "run-1" {
-		t.Fatalf("unexpected run id: %s", got.RunID)
-	}
-
-	abs, err := ResolveWorkFile(ctx, "notes/result.md")
-	if err != nil {
-		t.Fatalf("resolve work file: %v", err)
-	}
-	expected := filepath.Clean("/tmp/idea-factory/ws-1/run-1/notes/result.md")
-	if abs != expected {
-		t.Fatalf("unexpected absolute path: %s", abs)
-	}
-}
-
-func TestRunCreatesExplicitPlan(t *testing.T) {
+func TestRunCreatesInitialMainAgentActivity(t *testing.T) {
 	domain := newTestExplorationDomain()
 	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
@@ -119,15 +95,15 @@ func TestRunCreatesExplicitPlan(t *testing.T) {
 	if !ok {
 		t.Fatal("expected runtime state")
 	}
-	if len(state.Plans) == 0 {
-		t.Fatal("expected plan to be created")
+	if len(state.AgentTasks) == 0 {
+		t.Fatal("expected main-agent activity to be recorded")
 	}
 	if state.Balance.WorkspaceID == "" {
 		t.Fatal("expected balance state to be computed")
 	}
 }
 
-func TestPlanStepTransitions(t *testing.T) {
+func TestMainAgentActivityTransitions(t *testing.T) {
 	domain := newTestExplorationDomain()
 	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
@@ -141,25 +117,17 @@ func TestPlanStepTransitions(t *testing.T) {
 		t.Fatal("expected runtime state")
 	}
 
-	doneOrFailed := false
-	for _, step := range state.PlanSteps {
-		if step.Status == PlanStepDone || step.Status == PlanStepFailed {
-			doneOrFailed = true
-			break
-		}
-	}
-	if !doneOrFailed {
-		t.Fatal("expected at least one transitioned plan step")
-	}
-
 	for _, task := range state.AgentTasks {
 		if task.SubAgent == "" {
-			t.Fatal("expected sub-agent to be recorded")
+			t.Fatal("expected actor to be recorded")
 		}
+	}
+	if len(state.Results) == 0 {
+		t.Fatal("expected runtime result summaries")
 	}
 }
 
-func TestInterventionTriggersReplanning(t *testing.T) {
+func TestInterventionTriggersRuntimeReflection(t *testing.T) {
 	domain := newTestExplorationDomain()
 	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
@@ -172,11 +140,7 @@ func TestInterventionTriggersReplanning(t *testing.T) {
 	if !ok {
 		t.Fatal("expected runtime state")
 	}
-	if len(before.Plans) == 0 {
-		t.Fatal("expected initial plan")
-	}
-	beforePlanCount := len(before.Plans)
-	beforeVersion := before.Plans[len(before.Plans)-1].Version
+	beforeMutationCount := len(before.Mutations)
 
 	_, _, ok = domain.ApplyIntervention(created.Exploration.ID, InterventionReq{
 		Type:     InterventionShiftFocus,
@@ -191,25 +155,11 @@ func TestInterventionTriggersReplanning(t *testing.T) {
 	if !ok {
 		t.Fatal("expected runtime state after intervention")
 	}
-	if len(after.Plans) <= beforePlanCount {
-		t.Fatal("expected new plan version after intervention")
-	}
-	lastPlan := after.Plans[len(after.Plans)-1]
-	if lastPlan.Version <= beforeVersion {
-		t.Fatalf("expected plan version to increase, before=%d after=%d", beforeVersion, lastPlan.Version)
-	}
-
-	skipped := 0
-	for _, step := range after.PlanSteps {
-		if step.Status == PlanStepSkipped {
-			skipped++
-		}
-	}
-	if skipped == 0 {
-		t.Fatal("expected pending steps from previous plan to be marked skipped")
+	if len(after.Mutations) <= beforeMutationCount {
+		t.Fatal("expected intervention to produce additional runtime mutations")
 	}
 	if after.LatestReplanReason == "" {
-		t.Fatal("expected replan reason to be recorded")
+		t.Fatal("expected intervention reason to be recorded")
 	}
 	if after.Balance.UpdatedAt == 0 {
 		t.Fatal("expected balance state to be recomputed")
@@ -236,7 +186,10 @@ func TestWrappedToolResponses(t *testing.T) {
 }
 
 func TestDeepAgentRunE2E(t *testing.T) {
-	domain := newTestExplorationDomain()
+	domain := newScriptedExplorationDomain(
+		`{"summary":"workspace bootstrap noop","nodes":[],"edges":[]}`,
+		`{"summary":"append an agent runtime idea","nodes":[{"id":"idea-deep-agent","type":"idea","title":"Deep agent idea","summary":"Generated by the main agent run","status":"active","depth":4}],"edges":[{"id":"edge-deep-agent","from":"%s","to":"idea-deep-agent","type":"leads_to"}]}`,
+	)
 	created, err := domain.CreateWorkspace(CreateWorkspaceReq{
 		Topic:       "AI education",
 		OutputGoal:  "Research directions",
@@ -245,6 +198,13 @@ func TestDeepAgentRunE2E(t *testing.T) {
 	mistake.Unwrap(err)
 
 	initialNodes := len(created.DirectionMap.Nodes)
+	model := domain.Model.(*scriptedToolCallingModel)
+	model.replies[1] = strings.ReplaceAll(model.replies[1], "%s", created.Exploration.ActiveOpportunityID)
+
+	_, launched := domain.triggerRun(context.Background(), created.Exploration.ID, string(RunSourceManual))
+	if !launched {
+		t.Fatal("expected manual trigger to launch a run")
+	}
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -259,11 +219,8 @@ func TestDeepAgentRunE2E(t *testing.T) {
 	if len(state.Runs) == 0 {
 		t.Fatal("expected at least one run in runtime state")
 	}
-	if len(state.Plans) == 0 {
-		t.Fatal("expected at least one execution plan")
-	}
 	if len(state.AgentTasks) == 0 {
-		t.Fatal("expected delegated agent tasks")
+		t.Fatal("expected main-agent activity records")
 	}
 	if len(updated.DirectionMap.Nodes) <= initialNodes {
 		t.Fatalf("expected graph to grow, before=%d after=%d", initialNodes, len(updated.DirectionMap.Nodes))

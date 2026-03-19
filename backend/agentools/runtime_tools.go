@@ -3,6 +3,8 @@ package agentools
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/cloudwego/eino-examples/adk/multiagent/deep/utils"
 )
 
 type WrappedToolResponse struct {
@@ -23,7 +25,8 @@ func (RuntimeToolWrapper) NormalizeToolCall(toolName string, arguments string) (
 	}
 
 	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+	repaired := utils.RepairJSON(arguments)
+	if err := json.Unmarshal([]byte(repaired), &payload); err != nil {
 		return WrappedToolResponse{}, fmt.Errorf("decode tool args: %w", err)
 	}
 

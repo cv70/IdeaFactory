@@ -3,7 +3,6 @@ package exploration
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -118,65 +117,4 @@ func (d *ExplorationDomain) broadcastMutations(workspaceID string, mutations []M
 			d.removeSubscriber(workspaceID, client)
 		}
 	}
-}
-
-func (d *ExplorationDomain) startRuntime(workspaceID string) {
-	var alreadyRunning bool
-	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
-		if state.Running {
-			alreadyRunning = true
-			return
-		}
-		state.Running = true
-	})
-	if alreadyRunning {
-		return
-	}
-
-	go func() {
-		defer func() {
-			d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
-				state.Running = false
-				state.Cursor = 0
-			})
-		}()
-
-		for {
-			d.store.mu.RLock()
-			session, ok := d.store.workspaces[workspaceID]
-			if !ok {
-				d.store.mu.RUnlock()
-				return
-			}
-			current := *session
-			d.store.mu.RUnlock()
-
-			strategy := normalizeRuntimeStrategy(&current.Strategy)
-			if len(current.Runs) >= strategy.MaxRuns {
-				return
-			}
-
-			var targetOpportunityID string
-			d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
-				targetOpportunityID = chooseRuntimeTarget(current, state)
-			})
-
-			next := d.applyExpandOpportunity(current, targetOpportunityID)
-			d.executeRuntimeCycle(next, "runtime_tick")
-			mutations := diffMutations(current, next, "runtime")
-
-			d.store.mu.Lock()
-			if _, stillExists := d.store.workspaces[workspaceID]; !stillExists {
-				d.store.mu.Unlock()
-				return
-			}
-			d.store.workspaces[workspaceID] = &next
-			d.store.mu.Unlock()
-
-			d.persistWorkspace(next)
-			d.persistMutations(mutations)
-			d.broadcastMutations(workspaceID, mutations)
-			time.Sleep(time.Duration(strategy.IntervalMs) * time.Millisecond)
-		}
-	}()
 }

@@ -171,8 +171,8 @@ func TestGetWorkspaceNotFound(t *testing.T) {
 
 	var resp testResp[int]
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Code != http.StatusNotFound {
-		t.Fatalf("expected business 404, got %d", resp.Code)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected business 400 for invalid workspace id, got %d", resp.Code)
 	}
 }
 
@@ -206,11 +206,8 @@ func TestGetRuntimeState(t *testing.T) {
 	if len(runtimeResp.Data.Runs) == 0 {
 		t.Fatal("expected runtime runs")
 	}
-	if len(runtimeResp.Data.Plans) == 0 {
-		t.Fatal("expected runtime plans")
-	}
 	if len(runtimeResp.Data.AgentTasks) == 0 {
-		t.Fatal("expected runtime agent tasks")
+		t.Fatal("expected runtime activity records")
 	}
 }
 
@@ -253,11 +250,6 @@ func TestGetRuntimeStateWithFilters(t *testing.T) {
 	}
 	if len(runResp.Data.Runs) != 1 || runResp.Data.Runs[0].ID != targetRunID {
 		t.Fatalf("expected only run %s", targetRunID)
-	}
-	for _, plan := range runResp.Data.Plans {
-		if plan.RunID != targetRunID {
-			t.Fatalf("unexpected plan run id: %s", plan.RunID)
-		}
 	}
 	for _, task := range runResp.Data.AgentTasks {
 		if task.RunID != targetRunID {
@@ -480,15 +472,6 @@ func TestV1CreateRunAndGetRun(t *testing.T) {
 	if runResp.Run.Status == "" {
 		t.Fatal("expected run status")
 	}
-	if runResp.Run.CurrentPlan == nil {
-		t.Fatal("expected current plan")
-	}
-	if runResp.Run.CurrentPlan.Status == "" {
-		t.Fatal("expected current plan status")
-	}
-	if len(runResp.Run.CurrentPlan.Steps) == 0 {
-		t.Fatal("expected current plan steps")
-	}
 
 	getRunReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+created.Workspace.ID+"/runs/"+runResp.Run.ID, nil)
 	getRunW := httptest.NewRecorder()
@@ -564,9 +547,6 @@ func TestV1ProjectionAndInterventionLifecycle(t *testing.T) {
 	if interventionResp.Intervention.AbsorbedByRunID == "" {
 		t.Fatal("expected absorbed_by_run_id")
 	}
-	if interventionResp.Intervention.ReplannedPlanID == "" {
-		t.Fatal("expected replanned_plan_id")
-	}
 	if interventionResp.Intervention.ReflectedEventID == "" {
 		t.Fatal("expected reflected_event_id")
 	}
@@ -629,7 +609,7 @@ func TestV1TraceSummary(t *testing.T) {
 func TestV1ErrorShape(t *testing.T) {
 	r := newTestRouter()
 
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/non-exist", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/999999999", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -897,11 +877,7 @@ func TestV1ListTraceEvents(t *testing.T) {
 		t.Fatalf("expected composite cursor format, got %s", traceResp.NextCursor)
 	}
 
-	filteredReq, _ := http.NewRequest(
-		http.MethodGet,
-		"/api/v1/workspaces/"+created.Workspace.ID+"/trace/events?category=task",
-		nil,
-	)
+	filteredReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+created.Workspace.ID+"/trace/events?category=tool", nil)
 	filteredW := httptest.NewRecorder()
 	r.ServeHTTP(filteredW, filteredReq)
 	if filteredW.Code != http.StatusOK {
@@ -915,8 +891,8 @@ func TestV1ListTraceEvents(t *testing.T) {
 		t.Fatal("expected filtered trace items")
 	}
 	for _, item := range filtered.Items {
-		if item.Category != "task" {
-			t.Fatalf("expected task category, got %s", item.Category)
+		if item.Category != "tool" {
+			t.Fatalf("expected tool category, got %s", item.Category)
 		}
 	}
 
@@ -994,7 +970,7 @@ func TestV1ToggleFavoriteInterventionAffectsWorkspaceState(t *testing.T) {
 	}
 	ideaID := ""
 	for _, node := range snapshot.Exploration.Nodes {
-		if node.Type == NodeDirection {
+		if node.Type == NodeIdea {
 			ideaID = node.ID
 			break
 		}
@@ -1226,45 +1202,32 @@ func TestMutationEventsWrittenOnRunComplete(t *testing.T) {
 	}
 }
 
-func TestRuntimeCycleAddsEvidenceNodes(t *testing.T) {
-	_, domain := newTestRouterWithDomain()
+func TestRuntimeCycleAppendsMainAgentGraphBatch(t *testing.T) {
+	domain := newScriptedExplorationDomain(
+		`{"summary":"workspace bootstrap noop","nodes":[],"edges":[]}`,
+		`{"summary":"append a runtime evidence node","nodes":[{"id":"evidence-runtime-cycle","type":"evidence","title":"Runtime evidence","summary":"Generated during runtime cycle","status":"active","depth":2}],"edges":[{"id":"edge-runtime-cycle","from":"%s","to":"evidence-runtime-cycle","type":"supports"}]}`,
+	)
 
-	// Create workspace and seed initial Direction nodes
 	snapshot, err := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "machine learning safety", OutputGoal: "risk report"})
 	mistake.Unwrap(err)
 	wsID := snapshot.Exploration.ID
-	domain.initializeWorkspaceGraph(context.Background(), wsID)
+	activeID := snapshot.Exploration.ActiveOpportunityID
+	model := domain.Model.(*scriptedToolCallingModel)
+	model.replies[1] = strings.ReplaceAll(model.replies[1], "%s", activeID)
 
-	// Verify Direction nodes exist
-	ws1, ok := domain.GetWorkspace(wsID)
+	before, ok := domain.GetWorkspace(wsID)
 	if !ok {
 		t.Fatal("workspace not found after creation")
 	}
-	dirCount := 0
-	for _, n := range ws1.Exploration.Nodes {
-		if n.Type == NodeDirection {
-			dirCount++
-		}
-	}
-	if dirCount == 0 {
-		t.Fatal("expected Direction nodes after initializeWorkspaceGraph, got none")
-	}
 
-	// Run one cycle — should generate Evidence nodes (Research >= 0.5 by default)
-	domain.executeRuntimeCycle(ws1.Exploration, "test")
+	domain.executeRuntimeCycle(before.Exploration, "test")
 
-	ws2, ok := domain.GetWorkspace(wsID)
+	after, ok := domain.GetWorkspace(wsID)
 	if !ok {
 		t.Fatal("workspace not found after executeRuntimeCycle")
 	}
-	evCount := 0
-	for _, n := range ws2.Exploration.Nodes {
-		if n.Type == NodeEvidence {
-			evCount++
-		}
-	}
-	if evCount == 0 {
-		t.Errorf("expected Evidence nodes after executeRuntimeCycle, got none (total nodes: %d)", len(ws2.Exploration.Nodes))
+	if !hasNode(after.Exploration.Nodes, "evidence-runtime-cycle") {
+		t.Fatalf("expected runtime cycle to append evidence node, total nodes=%d", len(after.Exploration.Nodes))
 	}
 }
 
@@ -1322,6 +1285,116 @@ func TestCreateRun_IdempotentWhenAlreadyRunning(t *testing.T) {
 
 	if runW.Code != http.StatusOK {
 		t.Fatalf("expected 200 for idempotent re-request, got %d", runW.Code)
+	}
+}
+
+func TestV1RunResponseUsesSimplifiedAgentDrivenShape(t *testing.T) {
+	r, _ := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"agent runtime","output_goal":"map growth"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create workspace: expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var created WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create workspace: %v", err)
+	}
+
+	runReq, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces/"+created.Workspace.ID+"/runs", nil)
+	runW := httptest.NewRecorder()
+	r.ServeHTTP(runW, runReq)
+	if runW.Code != http.StatusAccepted {
+		t.Fatalf("create run: expected 202, got %d body=%s", runW.Code, runW.Body.String())
+	}
+
+	var runResp RunResponse
+	if err := json.Unmarshal(runW.Body.Bytes(), &runResp); err != nil {
+		t.Fatalf("decode run response: %v", err)
+	}
+	if runResp.Run.ID == "" {
+		t.Fatal("expected run id")
+	}
+	if runResp.Run.Status == "" {
+		t.Fatal("expected run status")
+	}
+}
+
+func TestV1TraceSummaryUsesRunToolMutationCategories(t *testing.T) {
+	r, domain := newTestRouterWithDomain()
+
+	createBody := []byte(`{"topic":"trace categories","output_goal":"runtime summary"}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create workspace: expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var created WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create workspace: %v", err)
+	}
+
+	domain.withWorkspaceState(created.Workspace.ID, func(state *RuntimeWorkspaceState) {
+		if len(state.Results) == 0 {
+			state.Results = append(state.Results, AgentTaskResultSummary{
+				TaskID:    "tool-1",
+				Summary:   "append_graph_batch added 2 nodes",
+				IsSuccess: true,
+				UpdatedAt: time.Now().UnixMilli(),
+			})
+		}
+	})
+
+	traceReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+created.Workspace.ID+"/trace/summary", nil)
+	traceW := httptest.NewRecorder()
+	r.ServeHTTP(traceW, traceReq)
+	if traceW.Code != http.StatusOK {
+		t.Fatalf("trace summary: expected 200, got %d body=%s", traceW.Code, traceW.Body.String())
+	}
+
+	var traceResp TraceSummaryResponse
+	if err := json.Unmarshal(traceW.Body.Bytes(), &traceResp); err != nil {
+		t.Fatalf("decode trace summary: %v", err)
+	}
+	if len(traceResp.Items) == 0 {
+		t.Fatal("expected trace items")
+	}
+	for _, item := range traceResp.Items {
+		if item.Category == "plan" || item.Category == "task" {
+			t.Fatalf("unexpected legacy trace category %q", item.Category)
+		}
+	}
+}
+
+func TestMainAgentRunsDoNotCreatePlannerArtifacts(t *testing.T) {
+	_, domain := newTestRouterWithDomain()
+
+	snapshot, err := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "agent growth", OutputGoal: "graph"})
+	mistake.Unwrap(err)
+
+	runID, launched := domain.triggerRun(context.Background(), snapshot.Exploration.ID, "manual")
+	if !launched {
+		t.Fatal("expected triggerRun to launch a new MainAgent run")
+	}
+	if runID == "" {
+		t.Fatal("expected run ID")
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	state, ok := domain.GetRuntimeState(snapshot.Exploration.ID)
+	if !ok {
+		t.Fatal("expected runtime state")
+	}
+	if len(state.AgentTasks) == 0 {
+		t.Fatal("expected main-agent activity records")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/prebuilt/deep"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 )
 
 // NewExplorationAgent 创建一个探索主代理，它是一个深度代理，包含多个子代理。
@@ -18,14 +19,14 @@ import (
 // 返回:
 //   - adk.ResumableAgent: 可恢复的探索主代理实例。
 //   - error: 如果创建过程中发生错误（例如模型为nil或子代理创建失败）。
-func NewExplorationAgent(ctx context.Context, cm model.ToolCallingChatModel) (adk.ResumableAgent, error) {
+func NewExplorationAgent(ctx context.Context, cm model.ToolCallingChatModel, graphTools ...tool.BaseTool) (adk.ResumableAgent, error) {
 	// 创建研究代理，用于收集外部证据和信号
 	researchAgent, err := NewResearchAgent(ctx, cm)
 	if err != nil {
 		return nil, err
 	}
 	// 创建图代理，用于处理图相关操作
-	graphAgent, err := NewGraphAgent(ctx, cm)
+	graphAgent, err := NewGraphAgent(ctx, cm, graphTools...)
 	if err != nil {
 		return nil, err
 	}

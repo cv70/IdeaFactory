@@ -9,10 +9,10 @@ func buildTraceSummary(workspaceID string, runID string, state RuntimeStateSnaps
 	resp := TraceSummaryResponse{WorkspaceID: workspaceID, RunID: runID, Items: []TraceSummaryItem{}}
 	for _, run := range state.Runs {
 		resp.Items = append(resp.Items, TraceSummaryItem{
-			ID:        "plan-" + run.ID,
+			ID:        "run-" + run.ID,
 			Timestamp: toRFC3339(run.StartedAt),
 			Level:     "info",
-			Category:  "plan",
+			Category:  "run",
 			Message:   fmt.Sprintf("run %s started with source %s", run.ID, run.Source),
 			RelatedIDs: []string{
 				run.ID,
@@ -21,13 +21,25 @@ func buildTraceSummary(workspaceID string, runID string, state RuntimeStateSnaps
 	}
 	for _, result := range state.Results {
 		resp.Items = append(resp.Items, TraceSummaryItem{
-			ID:        "task-" + result.TaskID,
+			ID:        "tool-" + result.TaskID,
 			Timestamp: toRFC3339(result.UpdatedAt),
 			Level:     "info",
-			Category:  "task",
+			Category:  "tool",
 			Message:   result.Summary,
 			RelatedIDs: []string{
 				result.TaskID,
+			},
+		})
+	}
+	for _, mutation := range state.Mutations {
+		resp.Items = append(resp.Items, TraceSummaryItem{
+			ID:        mutation.ID,
+			Timestamp: toRFC3339(mutation.CreatedAt),
+			Level:     "info",
+			Category:  "mutation",
+			Message:   mutation.Kind,
+			RelatedIDs: []string{
+				mutation.WorkspaceID,
 			},
 		})
 	}
@@ -97,7 +109,7 @@ func applyTracePagination(items []TraceSummaryItem, cursor string, limit int) ([
 
 func isValidTraceCategory(category string) bool {
 	switch category {
-	case "plan", "task", "tool", "projection", "intervention", "balance":
+	case "run", "tool", "mutation", "projection", "intervention", "balance":
 		return true
 	default:
 		return false

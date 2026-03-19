@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino-examples/adk/multiagent/deep/utils"
+	"github.com/cloudwego/eino/schema"
 )
 
 func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, source string) {
-	ctx := context.Background()
 	now := time.Now()
 	var skip bool
-	var newNodes []Node
-	var newEdges []Edge
-	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) > 0 {
 			skip = true
@@ -30,36 +30,24 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 		state.Runs = []Run{run}
 		state.Balance = buildInitialBalance(session, runID, now)
 		state.ReplanReason = ""
-
-		plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, state)
-		if plan != nil {
-			state.Plans = []ExecutionPlan{*plan}
-			state.PlanSteps = steps
-		}
-		// Execute the first step synchronously so callers immediately see tasks.
-		d.executeNextTodoStepLocked(session.ID, now, state)
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
-			Kind:        "run_created",
+			Kind:        string(MutationKindRunCreated),
 			Run:         &GenerationRun{ID: runID},
 			CreatedAt:   now.UnixMilli(),
 		})
-		run.Status = RunStatusCompleted
-		run.EndedAt = now.UnixMilli()
-		state.Runs[0] = run
-		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
-		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
-		stateCopy.Balance = state.Balance
-		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
-		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
-		stateCopy.ReplanReason = state.ReplanReason
 	})
 	if skip {
 		return
 	}
-	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
-	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
+	d.runSingleAgentPass(session.ID)
+	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
+		if len(state.Runs) > 0 {
+			state.Runs[0].Status = RunStatusCompleted
+			state.Runs[0].EndedAt = time.Now().UnixMilli()
+		}
+	})
 	d.persistRuntimeState(session.ID)
 }
 
@@ -77,10 +65,9 @@ func (d *ExplorationDomain) QueryRuntimeState(workspaceID string, query RuntimeS
 		found = true
 		snapshot = RuntimeStateSnapshot{
 			Runs:               append([]Run{}, state.Runs...),
-			Plans:              append([]ExecutionPlan{}, state.Plans...),
-			PlanSteps:          append([]PlanStep{}, state.PlanSteps...),
 			AgentTasks:         append([]AgentTask{}, state.AgentTasks...),
 			Results:            append([]AgentTaskResultSummary{}, state.Results...),
+			Mutations:          append([]MutationEvent{}, state.Mutations...),
 			Balance:            state.Balance,
 			LatestReplanReason: state.ReplanReason,
 		}
@@ -109,10 +96,9 @@ func filterRuntimeSnapshot(snapshot RuntimeStateSnapshot, query RuntimeStateQuer
 func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]struct{}) RuntimeStateSnapshot {
 	out := RuntimeStateSnapshot{
 		Runs:               []Run{},
-		Plans:              []ExecutionPlan{},
-		PlanSteps:          []PlanStep{},
 		AgentTasks:         []AgentTask{},
 		Results:            []AgentTaskResultSummary{},
+		Mutations:          []MutationEvent{},
 		LatestReplanReason: snapshot.LatestReplanReason,
 	}
 
@@ -122,31 +108,9 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 		}
 	}
 
-	planIDs := map[string]struct{}{}
-	for _, plan := range snapshot.Plans {
-		if _, ok := runIDs[plan.RunID]; !ok {
-			continue
-		}
-		out.Plans = append(out.Plans, plan)
-		planIDs[plan.ID] = struct{}{}
-	}
-
-	for _, step := range snapshot.PlanSteps {
-		if _, ok := runIDs[step.RunID]; !ok {
-			continue
-		}
-		if _, ok := planIDs[step.PlanID]; !ok {
-			continue
-		}
-		out.PlanSteps = append(out.PlanSteps, step)
-	}
-
 	taskIDs := map[string]struct{}{}
 	for _, task := range snapshot.AgentTasks {
 		if _, ok := runIDs[task.RunID]; !ok {
-			continue
-		}
-		if _, ok := planIDs[task.PlanID]; !ok {
 			continue
 		}
 		out.AgentTasks = append(out.AgentTasks, task)
@@ -162,86 +126,49 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 	if _, ok := runIDs[snapshot.Balance.RunID]; ok {
 		out.Balance = snapshot.Balance
 	}
+	for _, mutation := range snapshot.Mutations {
+		if mutation.Run == nil {
+			out.Mutations = append(out.Mutations, mutation)
+			continue
+		}
+		if _, ok := runIDs[mutation.Run.ID]; ok {
+			out.Mutations = append(out.Mutations, mutation)
+		}
+	}
 	return out
 }
 
 func (d *ExplorationDomain) replanRuntimeState(session ExplorationSession, intervention InterventionReq) {
-	ctx := context.Background()
 	now := time.Now()
-	var skip bool
-	var newNodes []Node
-	var newEdges []Edge
-	var stateCopy RuntimeWorkspaceState
+	var shouldRun bool
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
-		if len(state.Runs) == 0 {
-			skip = true
-			return
-		}
-		currentRun := state.Runs[len(state.Runs)-1]
-
-		// Skip pending steps on current plan
-		if len(state.Plans) > 0 {
-			currentPlan := state.Plans[len(state.Plans)-1]
-			for i := range state.PlanSteps {
-				if state.PlanSteps[i].PlanID != currentPlan.ID {
-					continue
-				}
-				if state.PlanSteps[i].Status == PlanStepTodo || state.PlanSteps[i].Status == PlanStepDoing {
-					state.PlanSteps[i].Status = PlanStepSkipped
-					state.PlanSteps[i].UpdatedAt = now.UnixMilli()
-				}
-			}
-		}
-
-		// Adjust balance for intervention intent keywords
+		currentRunID := latestRunID(state.Runs)
 		state.Balance = adjustBalanceForIntent(state.Balance, intervention.Note, now)
 		state.ReplanReason = fmt.Sprintf("%s:%s", intervention.Type, strings.TrimSpace(intervention.Note))
-
-		trigger := ReplanTrigger{
-			Kind: ReplanTriggerIntervention,
-		}
-		plan, steps, _ := d.planner.Replan(ctx, &session, state, trigger)
-		if plan != nil {
-			if len(state.Plans) > 0 {
-				plan.Version = state.Plans[len(state.Plans)-1].Version + 1
-			}
-			state.Plans = append(state.Plans, *plan)
-			state.PlanSteps = append(state.PlanSteps, steps...)
-		}
-
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
-			Kind:        "replanned",
-			Run:         &GenerationRun{ID: currentRun.ID},
+			Kind:        string(MutationKindInterventionAbsorbed),
+			Run:         &GenerationRun{ID: currentRunID},
 			CreatedAt:   now.UnixMilli(),
 		})
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(session.ID),
 			WorkspaceID: session.ID,
-			Kind:        "balance_updated",
+			Kind:        string(MutationKindBalanceUpdated),
 			CreatedAt:   now.UnixMilli(),
 		})
-		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
-		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
-		stateCopy.Balance = state.Balance
-		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
-		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
-		stateCopy.ReplanReason = state.ReplanReason
+		shouldRun = true
 	})
-	if skip {
+	if !shouldRun {
 		return
 	}
-	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
-	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
+	d.runSingleAgentPass(session.ID)
 	d.persistRuntimeState(session.ID)
 }
 
 func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, source string) {
-	ctx := context.Background()
 	now := time.Now()
-	var newNodes []Node
-	var newEdges []Edge
 
 	var skip bool
 	d.withWorkspaceState(session.ID, func(s *RuntimeWorkspaceState) {
@@ -251,29 +178,14 @@ func (d *ExplorationDomain) executeRuntimeCycle(session ExplorationSession, sour
 		return
 	}
 
-	var stateCopy RuntimeWorkspaceState
 	d.withWorkspaceState(session.ID, func(state *RuntimeWorkspaceState) {
 		if len(state.Runs) == 0 {
-			d.startRuntimeRunLocked(ctx, session, source, now, state)
+			d.startRuntimeRunLocked(session, source, now, state)
 		} else {
-			if !d.executeNextTodoStepLocked(session.ID, now, state) {
-				d.startRuntimeRunLocked(ctx, session, source, now, state)
-			}
-			state.Balance.Divergence += 0.01
-			if state.Balance.Divergence > 1 {
-				state.Balance.Divergence = 1
-			}
-			state.Balance.UpdatedAt = now.UnixMilli()
+			d.startRuntimeRunLocked(session, source, now, state)
 		}
-		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
-		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
-		stateCopy.Balance = state.Balance
-		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
-		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
-		stateCopy.ReplanReason = state.ReplanReason
 	})
-	newNodes, newEdges = d.planner.GenerateNodesForCycle(ctx, &session, &stateCopy)
-	d.applyGeneratedNodes(session.ID, newNodes, newEdges)
+	d.runSingleAgentPass(session.ID)
 	d.persistRuntimeState(session.ID)
 }
 
@@ -287,8 +199,6 @@ func (d *ExplorationDomain) restoreRuntimeState(workspaceID string) bool {
 			return
 		}
 		state.Runs = append([]Run{}, snapshot.Runs...)
-		state.Plans = append([]ExecutionPlan{}, snapshot.Plans...)
-		state.PlanSteps = append([]PlanStep{}, snapshot.PlanSteps...)
 		state.AgentTasks = append([]AgentTask{}, snapshot.AgentTasks...)
 		state.Results = append([]AgentTaskResultSummary{}, snapshot.Results...)
 		state.Balance = snapshot.Balance
@@ -297,7 +207,7 @@ func (d *ExplorationDomain) restoreRuntimeState(workspaceID string) bool {
 	return true
 }
 
-func (d *ExplorationDomain) startRuntimeRunLocked(ctx context.Context, session ExplorationSession, source string, now time.Time, state *RuntimeWorkspaceState) {
+func (d *ExplorationDomain) startRuntimeRunLocked(session ExplorationSession, source string, now time.Time, state *RuntimeWorkspaceState) {
 	runID := fmt.Sprintf("run-%s-%d", session.ID, now.UnixNano())
 	run := Run{
 		ID:          runID,
@@ -307,17 +217,6 @@ func (d *ExplorationDomain) startRuntimeRunLocked(ctx context.Context, session E
 		StartedAt:   now.UnixMilli(),
 	}
 	state.Runs = append(state.Runs, run)
-
-	plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, state)
-	if plan != nil {
-		if len(state.Plans) > 0 {
-			plan.Version = state.Plans[len(state.Plans)-1].Version + 1
-		}
-		state.Plans = append(state.Plans, *plan)
-		state.PlanSteps = append(state.PlanSteps, steps...)
-	}
-
-	_ = d.executeNextTodoStepLocked(session.ID, now, state)
 
 	newBalance := buildInitialBalance(session, runID, now)
 	if state.Balance.RunID != "" {
@@ -333,146 +232,14 @@ func (d *ExplorationDomain) startRuntimeRunLocked(ctx context.Context, session E
 	state.Mutations = append(state.Mutations, MutationEvent{
 		ID:          mutationID(session.ID),
 		WorkspaceID: session.ID,
-		Kind:        "run_created",
+		Kind:        string(MutationKindRunCreated),
 		Run:         &GenerationRun{ID: runID},
 		CreatedAt:   now.UnixMilli(),
 	})
 }
 
-func (d *ExplorationDomain) executeNextTodoStepLocked(workspaceID string, now time.Time, state *RuntimeWorkspaceState) bool {
-	if len(state.Plans) == 0 {
-		return false
-	}
-	currentPlan := state.Plans[len(state.Plans)-1]
-
-	targetIndex := -1
-	for i := len(state.PlanSteps) - 1; i >= 0; i-- {
-		if state.PlanSteps[i].PlanID == currentPlan.ID && state.PlanSteps[i].Status == PlanStepTodo {
-			targetIndex = i
-		}
-	}
-	if targetIndex == -1 {
-		return false
-	}
-
-	step := state.PlanSteps[targetIndex]
-	step.Status = PlanStepDoing
-	step.UpdatedAt = now.UnixMilli()
-
-	taskID := fmt.Sprintf("task-%s-%d", currentPlan.ID, step.Index)
-	task := AgentTask{
-		ID:          taskID,
-		WorkspaceID: workspaceID,
-		RunID:       currentPlan.RunID,
-		PlanID:      currentPlan.ID,
-		PlanStepID:  step.ID,
-		SubAgent:    subAgentForStep(step.Index),
-		Goal:        step.Desc,
-		Status:      PlanStepDone,
-		UpdatedAt:   now.UnixMilli(),
-	}
-
-	step.Status = PlanStepDone
-	step.UpdatedAt = now.UnixMilli()
-	state.PlanSteps[targetIndex] = step
-	state.AgentTasks = append(state.AgentTasks, task)
-	state.Results = append(state.Results, AgentTaskResultSummary{
-		TaskID:    taskID,
-		Summary:   subAgentForStep(step.Index) + " step completed",
-		IsSuccess: true,
-		UpdatedAt: now.UnixMilli(),
-	})
-	return true
-}
-
-// snapshotForCycle reads a consistent copy of session and runtime state for use by GenerateNodesForCycle.
-// Acquires store.mu then runtime.mu separately — never both simultaneously.
-// hasTodo is true if the current plan has at least one PlanStepTodo step.
-func (d *ExplorationDomain) snapshotForCycle(workspaceID string) (session ExplorationSession, state RuntimeWorkspaceState, hasTodo bool) {
-	// Step 1: copy session under store.mu
-	d.store.mu.RLock()
-	if ws, ok := d.store.workspaces[workspaceID]; ok {
-		session = *ws
-	}
-	d.store.mu.RUnlock()
-
-	// Step 2: copy runtime state under runtime.mu
-	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
-		state.Plans = append([]ExecutionPlan{}, s.Plans...)
-		state.PlanSteps = append([]PlanStep{}, s.PlanSteps...)
-		state.Balance = s.Balance
-		state.AgentTasks = append([]AgentTask{}, s.AgentTasks...)
-		state.Results = append([]AgentTaskResultSummary{}, s.Results...)
-		state.ReplanReason = s.ReplanReason
-		if len(s.Plans) > 0 {
-			currentPlanID := s.Plans[len(s.Plans)-1].ID
-			for _, step := range s.PlanSteps {
-				if step.PlanID == currentPlanID && step.Status == PlanStepTodo {
-					hasTodo = true
-					break
-				}
-			}
-		}
-	})
-	return
-}
-
-// markStepDoneAndCheck marks the first Todo step in the current plan as Done,
-// appends an AgentTask result, and returns true if no Todo steps remain.
-func (d *ExplorationDomain) markStepDoneAndCheck(workspaceID string) (allDone bool) {
-	now := time.Now()
-	d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
-		if len(s.Plans) == 0 {
-			allDone = true
-			return
-		}
-		currentPlan := s.Plans[len(s.Plans)-1]
-		targetIdx := -1
-		for i, step := range s.PlanSteps {
-			if step.PlanID == currentPlan.ID && step.Status == PlanStepTodo {
-				targetIdx = i
-				break
-			}
-		}
-		if targetIdx == -1 {
-			allDone = true
-			return
-		}
-		step := &s.PlanSteps[targetIdx]
-		taskID := fmt.Sprintf("task-%s-%d", currentPlan.ID, step.Index)
-		s.AgentTasks = append(s.AgentTasks, AgentTask{
-			ID:          taskID,
-			WorkspaceID: workspaceID,
-			RunID:       currentPlan.RunID,
-			PlanID:      currentPlan.ID,
-			PlanStepID:  step.ID,
-			SubAgent:    subAgentForStep(step.Index),
-			Goal:        step.Desc,
-			Status:      PlanStepDone,
-			UpdatedAt:   now.UnixMilli(),
-		})
-		s.Results = append(s.Results, AgentTaskResultSummary{
-			TaskID:    taskID,
-			Summary:   subAgentForStep(step.Index) + " completed",
-			IsSuccess: true,
-			UpdatedAt: now.UnixMilli(),
-		})
-		step.Status = PlanStepDone
-		step.UpdatedAt = now.UnixMilli()
-		// Check if any Todo steps remain
-		for _, st := range s.PlanSteps {
-			if st.PlanID == currentPlan.ID && st.Status == PlanStepTodo {
-				return // more work to do
-			}
-		}
-		allDone = true
-	})
-	return
-}
-
-// runAgentCycle drives the agent execution loop for a workspace in a background goroutine.
-// It reads state snapshots, calls LLMPlanner.GenerateNodesForCycle outside locks,
-// applies nodes, and broadcasts via WebSocket. Sets AgentRunning=false on completion or panic.
+// runAgentCycle drives the single-pass MainAgent execution loop for a workspace in a background goroutine.
+// It performs one runtime pass, persists state, and sets AgentRunning=false on completion or panic.
 func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 	// Read current run ID before defer (needed in panic handler)
 	var currentRunID string
@@ -494,33 +261,15 @@ func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 			d.broadcastMutations(workspaceID, []MutationEvent{{
 				ID:          mutationID(workspaceID),
 				WorkspaceID: workspaceID,
-				Kind:        "run_failed",
+				Kind:        string(MutationKindRunFailed),
 				Run:         &GenerationRun{ID: currentRunID},
 				CreatedAt:   time.Now().UnixMilli(),
 			}})
 		}
 	}()
 
-	totalCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-
-	for {
-		sessionCopy, stateCopy, hasTodo := d.snapshotForCycle(workspaceID)
-		if !hasTodo {
-			break
-		}
-
-		stepCtx, stepCancel := context.WithTimeout(totalCtx, 2*time.Minute)
-		nodes, edges := d.planner.GenerateNodesForCycle(stepCtx, &sessionCopy, &stateCopy)
-		stepCancel()
-
-		d.applyGeneratedNodes(workspaceID, nodes, edges)
-		allDone := d.markStepDoneAndCheck(workspaceID)
-		d.persistRuntimeState(workspaceID)
-		if allDone {
-			break
-		}
-	}
+	d.runSingleAgentPass(workspaceID)
+	d.persistRuntimeState(workspaceID)
 
 	// Mark complete and broadcast
 	var completedRunID string
@@ -537,7 +286,7 @@ func (d *ExplorationDomain) runAgentCycle(workspaceID string) {
 	d.broadcastMutations(workspaceID, []MutationEvent{{
 		ID:          mutationID(workspaceID),
 		WorkspaceID: workspaceID,
-		Kind:        "run_completed",
+		Kind:        string(MutationKindRunCompleted),
 		Run:         &GenerationRun{ID: completedRunID},
 		CreatedAt:   time.Now().UnixMilli(),
 	}})
@@ -555,9 +304,7 @@ func (d *ExplorationDomain) triggerRun(ctx context.Context, workspaceID string, 
 		return "", false
 	}
 	session := snapshot.Exploration
-
-	// Build plan outside lock (deterministic, no I/O).
-	plan, steps, _ := d.planner.BuildInitialPlan(ctx, &session, &RuntimeWorkspaceState{})
+	_ = ctx
 
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
 		if state.AgentRunning {
@@ -579,21 +326,10 @@ func (d *ExplorationDomain) triggerRun(ctx context.Context, workspaceID string, 
 		if state.Balance.WorkspaceID == "" {
 			state.Balance = buildInitialBalance(session, runID, now)
 		}
-		if plan != nil {
-			plan.RunID = runID
-			for i := range steps {
-				steps[i].RunID = runID
-			}
-			if len(state.Plans) > 0 {
-				plan.Version = state.Plans[len(state.Plans)-1].Version + 1
-			}
-			state.Plans = append(state.Plans, *plan)
-			state.PlanSteps = append(state.PlanSteps, steps...)
-		}
 		state.Mutations = append(state.Mutations, MutationEvent{
 			ID:          mutationID(workspaceID),
 			WorkspaceID: workspaceID,
-			Kind:        "run_created",
+			Kind:        string(MutationKindRunCreated),
 			Run:         &GenerationRun{ID: runID},
 			CreatedAt:   now.UnixMilli(),
 		})
@@ -607,17 +343,119 @@ func (d *ExplorationDomain) triggerRun(ctx context.Context, workspaceID string, 
 	return runID, launched
 }
 
-func subAgentForStep(index int) string {
-	switch index {
-	case 1:
-		return "research"
-	case 2:
-		return "graph"
-	case 3:
-		return "artifact"
-	default:
-		return "general"
+func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
+	d.store.mu.RLock()
+	session, ok := d.store.workspaces[workspaceID]
+	if !ok {
+		d.store.mu.RUnlock()
+		return
 	}
+	sessionCopy := *session
+	d.store.mu.RUnlock()
+
+	var stateCopy RuntimeWorkspaceState
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		stateCopy.Balance = state.Balance
+		stateCopy.ReplanReason = state.ReplanReason
+	})
+
+	summary, runErr := d.runMainAgentGraphBatch(context.Background(), workspaceID, &sessionCopy, &stateCopy)
+
+	now := time.Now().UnixMilli()
+	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
+		if summary == "" {
+			summary = "main agent completed without graph changes"
+		}
+		taskID := fmt.Sprintf("main-agent-%s-%d", workspaceID, now)
+		isSuccess := runErr == nil
+		if runErr != nil {
+			summary = runErr.Error()
+		}
+		state.AgentTasks = append(state.AgentTasks, AgentTask{
+			ID:          taskID,
+			WorkspaceID: workspaceID,
+			RunID:       latestRunID(state.Runs),
+			SubAgent:    string(RuntimeActorMainAgent),
+			Goal:        MainAgentGraphGoal,
+			Status:      RuntimeTaskDone,
+			UpdatedAt:   now,
+		})
+		state.Results = append(state.Results, AgentTaskResultSummary{
+			TaskID:    taskID,
+			Summary:   summary,
+			IsSuccess: isSuccess,
+			UpdatedAt: now,
+		})
+	})
+}
+
+func (d *ExplorationDomain) runMainAgentGraphBatch(ctx context.Context, workspaceID string, session *ExplorationSession, state *RuntimeWorkspaceState) (string, error) {
+	if d.DeepAgent == nil {
+		return "main agent completed without graph changes", nil
+	}
+	iter := d.DeepAgent.Run(ctx, &adk.AgentInput{
+		Messages: []adk.Message{
+			schema.UserMessage(d.buildMainAgentGraphPrompt(session, state)),
+		},
+	})
+
+	lastAssistantMessage := ""
+	for event, ok := iter.Next(); ok; event, ok = iter.Next() {
+		if event == nil {
+			continue
+		}
+		if event.Err != nil {
+			return "", event.Err
+		}
+		if event.Output == nil || event.Output.MessageOutput == nil {
+			continue
+		}
+		if event.Output.MessageOutput.Role != schema.Assistant {
+			continue
+		}
+		msg, err := event.Output.MessageOutput.GetMessage()
+		if err != nil {
+			return "", err
+		}
+		if msg != nil && strings.TrimSpace(msg.Content) != "" {
+			lastAssistantMessage = msg.Content
+		}
+	}
+	return parseMainAgentSummary(lastAssistantMessage), nil
+}
+
+func parseMainAgentSummary(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "main agent completed without graph changes"
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "SUMMARY:") {
+			continue
+		}
+		summary := strings.TrimSpace(strings.TrimPrefix(line, "SUMMARY:"))
+		if summary != "" {
+			return summary
+		}
+		break
+	}
+
+	// Keep a readable fallback even when the agent misses the format contract.
+	firstLine := strings.TrimSpace(strings.Split(utils.RepairJSON(trimmed), "\n")[0])
+	if firstLine != "" {
+		return firstLine
+	}
+	return "main agent completed without graph changes"
+}
+
+func latestRunID(runs []Run) string {
+	if len(runs) == 0 {
+		return ""
+	}
+	return runs[len(runs)-1].ID
 }
 
 // adjustBalanceForIntent adjusts BalanceState fields based on intent keyword scanning.
@@ -668,36 +506,8 @@ func adjustBalanceForIntent(prev BalanceState, intent string, now time.Time) Bal
 	return next
 }
 
-// applyGeneratedNodes adds newNodes/newEdges to the session store,
-// writes node_added/edge_added mutation events, broadcasts them, and persists the session.
-// Must be called while NOT holding store.mu or runtime.mu.
-func (d *ExplorationDomain) applyGeneratedNodes(workspaceID string, newNodes []Node, newEdges []Edge) {
-	if len(newNodes) == 0 && len(newEdges) == 0 {
-		return
-	}
-	d.store.mu.Lock()
-	current, ok := d.store.workspaces[workspaceID]
-	if !ok {
-		d.store.mu.Unlock()
-		return
-	}
-	prev := *current
-	current.Nodes = append(current.Nodes, newNodes...)
-	current.Edges = append(current.Edges, newEdges...)
-	mutations := diffMutations(prev, *current, "runtime")
-	updatedCopy := *current
-	d.store.mu.Unlock()
-
-	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
-		state.Mutations = append(state.Mutations, mutations...)
-	})
-	d.broadcastMutations(workspaceID, mutations)
-	d.persistWorkspace(updatedCopy)
-}
-
-// initializeWorkspaceGraph calls BuildInitialPlan and GenerateNodesForCycle synchronously,
-// adding the generated Direction nodes to the session's in-memory store.
-// Must be called while NOT holding runtime.mu.
+// initializeWorkspaceGraph is a compatibility helper for tests and legacy bootstrap paths.
+// It uses the deterministic generator to append a one-time graph batch without involving planner state.
 func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, workspaceID string) {
 	d.store.mu.Lock()
 	session, ok := d.store.workspaces[workspaceID]
@@ -715,16 +525,14 @@ func (d *ExplorationDomain) initializeWorkspaceGraph(ctx context.Context, worksp
 			runID := fmt.Sprintf("init-%s-%d", workspaceID, now.UnixNano())
 			state.Balance = buildInitialBalance(sessionCopy, runID, now)
 		}
-		stateCopy.Plans = append([]ExecutionPlan{}, state.Plans...)
-		stateCopy.PlanSteps = append([]PlanStep{}, state.PlanSteps...)
 		stateCopy.Balance = state.Balance
 		stateCopy.AgentTasks = append([]AgentTask{}, state.AgentTasks...)
 		stateCopy.Results = append([]AgentTaskResultSummary{}, state.Results...)
 		stateCopy.ReplanReason = state.ReplanReason
 	})
 
-	newNodes, newEdges := d.planner.GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
-	d.applyGeneratedNodes(workspaceID, newNodes, newEdges)
+	newNodes, newEdges := NewDeterministicPlanner().GenerateNodesForCycle(ctx, &sessionCopy, &stateCopy)
+	_, _ = d.appendGraphBatch(workspaceID, newNodes, newEdges, string(MutationSourceRuntime))
 }
 
 // scheduleNextRun inspects workspace state and, if scheduling is warranted,
@@ -800,7 +608,7 @@ func (d *ExplorationDomain) scheduleNextRun(workspaceID string) {
 			d.withWorkspaceState(workspaceID, func(s *RuntimeWorkspaceState) {
 				s.cancelScheduler = nil
 			})
-			d.triggerRun(ctx, workspaceID, "auto")
+			d.triggerRun(ctx, workspaceID, string(RunSourceAuto))
 		case <-ctx.Done():
 			// Cancelled by pauseScheduler — do nothing.
 		}

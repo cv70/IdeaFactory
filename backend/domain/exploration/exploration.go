@@ -278,8 +278,7 @@ func (d *ExplorationDomain) CreateWorkspace(req CreateWorkspaceReq) (*WorkspaceS
 	if err != nil {
 		return nil, err
 	}
-	d.initializeRuntimeState(session, "workspace_create")
-	d.startRuntime(session.ID)
+	d.initializeRuntimeState(session, string(RunSourceWorkspaceCreate))
 	snapshot := d.buildWorkspaceSnapshot(session, "")
 	return snapshot, nil
 }
@@ -303,12 +302,11 @@ func (d *ExplorationDomain) GetWorkspace(workspaceID string) (*WorkspaceSnapshot
 		d.store.mu.Unlock()
 		session = loaded
 		d.restoreRuntimeState(workspaceID)
-		d.initializeRuntimeState(*session, "workspace_load")
-		d.startRuntime(workspaceID)
+		d.initializeRuntimeState(*session, string(RunSourceWorkspaceLoad))
 	}
 	copySession := *session
 	d.restoreRuntimeState(workspaceID)
-	d.initializeRuntimeState(copySession, "workspace_read")
+	d.initializeRuntimeState(copySession, string(RunSourceWorkspaceRead))
 	snapshot := d.buildWorkspaceSnapshot(copySession, "")
 	return snapshot, true
 }
@@ -450,27 +448,6 @@ func (d *ExplorationDomain) applyToggleFavorite(session ExplorationSession, idea
 	return session
 }
 
-func chooseRuntimeTarget(session ExplorationSession, state *RuntimeWorkspaceState) string {
-	opportunities := filterNodesByType(session.Nodes, NodeOpportunity)
-	if len(opportunities) == 0 {
-		return session.ActiveOpportunityID
-	}
-	strategy := normalizeRuntimeStrategy(&session.Strategy)
-	if strategy.PreferredBranchID != "" {
-		for _, opportunity := range opportunities {
-			if opportunity.ID == strategy.PreferredBranchID {
-				return opportunity.ID
-			}
-		}
-	}
-	if strategy.ExpansionMode == "round_robin" {
-		idx := state.Cursor % len(opportunities)
-		state.Cursor = (idx + 1) % len(opportunities)
-		return opportunities[idx].ID
-	}
-	return session.ActiveOpportunityID
-}
-
 func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrategyReq) (*WorkspaceSnapshot, []MutationEvent, bool) {
 	d.store.mu.Lock()
 	session, ok := d.store.workspaces[workspaceID]
@@ -518,7 +495,6 @@ func (d *ExplorationDomain) UpdateStrategy(workspaceID string, req UpdateStrateg
 		})
 	}
 	d.persistMutations(mutations)
-	d.startRuntime(workspaceID)
 	snapshot := d.buildWorkspaceSnapshot(next, "")
 	return snapshot, mutations, true
 }

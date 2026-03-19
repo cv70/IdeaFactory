@@ -56,29 +56,10 @@ type RuntimeRunRecord struct {
 	EndedAt     int64  `json:"ended_at"`
 }
 
-type RuntimePlanRecord struct {
-	gorm.Model
-	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
-	RunID       string `json:"run_id" gorm:"index"`
-	Version     int    `json:"version"`
-}
-
-type RuntimePlanStepRecord struct {
-	gorm.Model
-	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
-	RunID       string `json:"run_id" gorm:"index"`
-	PlanID      string `json:"plan_id" gorm:"index"`
-	StepIndex   int    `json:"step_index"`
-	Desc        string `json:"desc"`
-	Status      string `json:"status"`
-}
-
 type RuntimeAgentTaskRecord struct {
 	gorm.Model
 	WorkspaceID uint   `json:"workspace_id" gorm:"index"`
 	RunID       string `json:"run_id" gorm:"index"`
-	PlanID      string `json:"plan_id" gorm:"index"`
-	PlanStepID  string `json:"plan_step_id" gorm:"index"`
 	SubAgent    string `json:"sub_agent"`
 	Goal        string `json:"goal"`
 	Status      string `json:"status"`
@@ -107,8 +88,6 @@ type RuntimeBalanceRecord struct {
 type RuntimeStateProjection struct {
 	WorkspaceID        uint
 	Runs               []RuntimeRunRecord
-	Plans              []RuntimePlanRecord
-	PlanSteps          []RuntimePlanStepRecord
 	AgentTasks         []RuntimeAgentTaskRecord
 	Results            []RuntimeTaskResultRecord
 	Balance            *RuntimeBalanceRecord
@@ -127,8 +106,6 @@ func (d *DB) ReplaceWorkspaceRuntimeProjection(state RuntimeStateProjection) err
 
 	tables := []any{
 		&RuntimeRunRecord{},
-		&RuntimePlanRecord{},
-		&RuntimePlanStepRecord{},
 		&RuntimeAgentTaskRecord{},
 		&RuntimeTaskResultRecord{},
 		&RuntimeBalanceRecord{},
@@ -141,16 +118,6 @@ func (d *DB) ReplaceWorkspaceRuntimeProjection(state RuntimeStateProjection) err
 
 	if len(state.Runs) > 0 {
 		if err := tx.Create(&state.Runs).Error; err != nil {
-			return rollback(err)
-		}
-	}
-	if len(state.Plans) > 0 {
-		if err := tx.Create(&state.Plans).Error; err != nil {
-			return rollback(err)
-		}
-	}
-	if len(state.PlanSteps) > 0 {
-		if err := tx.Create(&state.PlanSteps).Error; err != nil {
 			return rollback(err)
 		}
 	}
@@ -185,22 +152,6 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID uint) (*RuntimeStateProj
 		return nil, nil
 	}
 
-	var plans []RuntimePlanRecord
-	if err := d.DB().
-		Where("workspace_id = ?", workspaceID).
-		Order("created_at asc, id asc").
-		Find(&plans).Error; err != nil {
-		return nil, err
-	}
-
-	var steps []RuntimePlanStepRecord
-	if err := d.DB().
-		Where("workspace_id = ?", workspaceID).
-		Order("updated_at asc, step_index asc, id asc").
-		Find(&steps).Error; err != nil {
-		return nil, err
-	}
-
 	var tasks []RuntimeAgentTaskRecord
 	if err := d.DB().
 		Where("workspace_id = ?", workspaceID).
@@ -230,8 +181,6 @@ func (d *DB) LoadWorkspaceRuntimeProjection(workspaceID uint) (*RuntimeStateProj
 	out := &RuntimeStateProjection{
 		WorkspaceID: workspaceID,
 		Runs:        runs,
-		Plans:       plans,
-		PlanSteps:   steps,
 		AgentTasks:  tasks,
 		Results:     results,
 		Balance:     balancePtr,

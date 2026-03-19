@@ -25,7 +25,7 @@ func (d *ExplorationDomain) ApiV1CreateRun(c *gin.Context) {
 
 	source := strings.TrimSpace(req.Trigger)
 	if source == "" {
-		source = "manual"
+		source = string(RunSourceManual)
 	}
 
 	runID, launched := d.triggerRun(c.Request.Context(), workspaceID, source)
@@ -162,11 +162,11 @@ func normalizeRunStatus(status RunStatus) string {
 	case RunStatusPending:
 		return "queued"
 	case RunStatusRunning:
-		return "planning"
-	case RunStatusCompleted:
-		return "completed"
+		return "running"
 	case RunStatusFailed:
 		return "failed"
+	case RunStatusCompleted:
+		return "completed"
 	default:
 		return "completed"
 	}
@@ -181,120 +181,11 @@ func (d *ExplorationDomain) buildRunView(state RuntimeStateSnapshot, run Run) Ru
 		StartedAt:   toRFC3339(run.StartedAt),
 		FinishedAt:  toRFC3339(run.EndedAt),
 	}
-	stepToAgent := map[string]string{}
-	for _, task := range state.AgentTasks {
-		if task.RunID != run.ID {
-			continue
-		}
-		if task.PlanStepID == "" {
-			continue
-		}
-		stepToAgent[task.PlanStepID] = normalizeAgentName(task.SubAgent)
-	}
-
-	latestPlanIndex := -1
-	for _, plan := range state.Plans {
-		if plan.RunID != run.ID {
-			continue
-		}
-		if latestPlanIndex == -1 || plan.Version >= state.Plans[latestPlanIndex].Version {
-			p := plan
-			view.CurrentPlan = &PlanView{
-				ID:      p.ID,
-				Version: p.Version,
-				Status:  derivePlanStatus(state, p, run),
-			}
-			latestPlanIndex = indexOfPlan(state.Plans, p.ID)
-		}
-	}
-	if view.CurrentPlan != nil {
-		for _, step := range state.PlanSteps {
-			if step.RunID != run.ID || step.PlanID != view.CurrentPlan.ID {
-				continue
-			}
-			assigned := stepToAgent[step.ID]
-			if assigned == "" {
-				assigned = inferAgentFromStep(step.Desc)
-			}
-			view.CurrentPlan.Steps = append(view.CurrentPlan.Steps, PlanStepV1{
-				ID:            step.ID,
-				Order:         step.Index,
-				Kind:          step.Desc,
-				AssignedAgent: assigned,
-				Status:        normalizeStepStatus(step.Status),
-			})
-		}
-	}
 	return view
 }
 
-func indexOfPlan(plans []ExecutionPlan, planID string) int {
-	for i := range plans {
-		if plans[i].ID == planID {
-			return i
-		}
-	}
-	return -1
-}
-
-func normalizeStepStatus(status PlanStepStatus) string {
-	if status == "" {
-		return "todo"
-	}
-	return string(status)
-}
-
-func normalizeAgentName(name string) string {
-	low := strings.ToLower(strings.TrimSpace(name))
-	switch {
-	case strings.Contains(low, "research"):
-		return "research"
-	case strings.Contains(low, "graph"):
-		return "graph"
-	case strings.Contains(low, "artifact"):
-		return "artifact"
-	default:
-		return "general"
-	}
-}
-
-func derivePlanStatus(state RuntimeStateSnapshot, plan ExecutionPlan, run Run) string {
-	hasNewer := false
-	for _, p := range state.Plans {
-		if p.RunID == plan.RunID && p.Version > plan.Version {
-			hasNewer = true
-			break
-		}
-	}
-	if hasNewer {
-		return "superseded"
-	}
-
-	total := 0
-	done := 0
-	failed := 0
-	for _, step := range state.PlanSteps {
-		if step.PlanID != plan.ID {
-			continue
-		}
-		total++
-		if step.Status == PlanStepDone || step.Status == PlanStepSkipped {
-			done++
-		}
-		if step.Status == PlanStepFailed {
-			failed++
-		}
-	}
-	if failed > 0 {
-		return "failed"
-	}
-	if total > 0 && done == total && run.EndedAt > 0 {
-		return "completed"
-	}
-	return "active"
-}
-
 func deriveRunStatus(state RuntimeStateSnapshot, run Run) string {
+	_ = state
 	if run.Status == RunStatusFailed {
 		return "failed"
 	}
@@ -302,68 +193,11 @@ func deriveRunStatus(state RuntimeStateSnapshot, run Run) string {
 		return "queued"
 	}
 	if run.Status == RunStatusRunning {
-		hasPlan := false
-		hasDoing := false
-		hasResult := false
-		for _, plan := range state.Plans {
-			if plan.RunID == run.ID {
-				hasPlan = true
-				break
-			}
-		}
-		for _, step := range state.PlanSteps {
-			if step.RunID != run.ID {
-				continue
-			}
-			if step.Status == PlanStepDoing || step.Status == PlanStepTodo {
-				hasDoing = true
-			}
-		}
-		for _, result := range state.Results {
-			taskID := result.TaskID
-			for _, task := range state.AgentTasks {
-				if task.ID == taskID && task.RunID == run.ID {
-					hasResult = true
-					break
-				}
-			}
-		}
-		if !hasPlan {
-			return "planning"
-		}
-		if hasDoing {
-			return "dispatching"
-		}
-		if hasResult {
-			return "integrating"
-		}
-		return "planning"
+		return "running"
 	}
 
 	if run.Status == RunStatusCompleted {
-		for _, result := range state.Results {
-			taskID := result.TaskID
-			for _, task := range state.AgentTasks {
-				if task.ID == taskID && task.RunID == run.ID {
-					return "projected"
-				}
-			}
-		}
 		return "completed"
 	}
 	return normalizeRunStatus(run.Status)
-}
-
-func inferAgentFromStep(desc string) string {
-	lower := strings.ToLower(desc)
-	switch {
-	case strings.Contains(lower, "research"):
-		return "research"
-	case strings.Contains(lower, "graph"):
-		return "graph"
-	case strings.Contains(lower, "artifact"):
-		return "artifact"
-	default:
-		return "general"
-	}
 }

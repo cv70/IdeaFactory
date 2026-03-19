@@ -199,8 +199,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 	projection := dbdao.RuntimeStateProjection{
 		WorkspaceID: workspaceDBID,
 		Runs:        make([]dbdao.RuntimeRunRecord, 0, len(snapshot.Runs)),
-		Plans:       make([]dbdao.RuntimePlanRecord, 0, len(snapshot.Plans)),
-		PlanSteps:   make([]dbdao.RuntimePlanStepRecord, 0, len(snapshot.PlanSteps)),
 		AgentTasks:  make([]dbdao.RuntimeAgentTaskRecord, 0, len(snapshot.AgentTasks)),
 		Results:     make([]dbdao.RuntimeTaskResultRecord, 0, len(snapshot.Results)),
 	}
@@ -217,31 +215,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 			EndedAt:     item.EndedAt,
 		})
 	}
-	for _, item := range snapshot.Plans {
-		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
-		if err != nil {
-			itemWorkspaceID = workspaceDBID
-		}
-		projection.Plans = append(projection.Plans, dbdao.RuntimePlanRecord{
-			WorkspaceID: itemWorkspaceID,
-			RunID:       item.RunID,
-			Version:     item.Version,
-		})
-	}
-	for _, item := range snapshot.PlanSteps {
-		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
-		if err != nil {
-			itemWorkspaceID = workspaceDBID
-		}
-		projection.PlanSteps = append(projection.PlanSteps, dbdao.RuntimePlanStepRecord{
-			WorkspaceID: itemWorkspaceID,
-			RunID:       item.RunID,
-			PlanID:      item.PlanID,
-			StepIndex:   item.Index,
-			Desc:        item.Desc,
-			Status:      string(item.Status),
-		})
-	}
 	for _, item := range snapshot.AgentTasks {
 		itemWorkspaceID, err := parseWorkspaceID(item.WorkspaceID)
 		if err != nil {
@@ -250,8 +223,6 @@ func (d *ExplorationDomain) persistRuntimeState(workspaceID string) {
 		projection.AgentTasks = append(projection.AgentTasks, dbdao.RuntimeAgentTaskRecord{
 			WorkspaceID: itemWorkspaceID,
 			RunID:       item.RunID,
-			PlanID:      item.PlanID,
-			PlanStepID:  item.PlanStepID,
 			SubAgent:    item.SubAgent,
 			Goal:        item.Goal,
 			Status:      string(item.Status),
@@ -296,8 +267,6 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 	if err == nil && projection != nil && len(projection.Runs) > 0 {
 		out := RuntimeStateSnapshot{
 			Runs:               make([]Run, 0, len(projection.Runs)),
-			Plans:              make([]ExecutionPlan, 0, len(projection.Plans)),
-			PlanSteps:          make([]PlanStep, 0, len(projection.PlanSteps)),
 			AgentTasks:         make([]AgentTask, 0, len(projection.AgentTasks)),
 			Results:            make([]AgentTaskResultSummary, 0, len(projection.Results)),
 			LatestReplanReason: projection.LatestReplanReason,
@@ -312,37 +281,14 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 				EndedAt:     item.EndedAt,
 			})
 		}
-		for _, item := range projection.Plans {
-			out.Plans = append(out.Plans, ExecutionPlan{
-				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
-				RunID:       item.RunID,
-				Version:     item.Version,
-				CreatedAt:   item.CreatedAt.UnixMilli(),
-			})
-		}
-		for _, item := range projection.PlanSteps {
-			out.PlanSteps = append(out.PlanSteps, PlanStep{
-				ID:          strconv.FormatUint(uint64(item.ID), 10),
-				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
-				RunID:       item.RunID,
-				PlanID:      item.PlanID,
-				Index:       item.StepIndex,
-				Desc:        item.Desc,
-				Status:      PlanStepStatus(item.Status),
-				UpdatedAt:   item.UpdatedAt.UnixMilli(),
-			})
-		}
 		for _, item := range projection.AgentTasks {
 			out.AgentTasks = append(out.AgentTasks, AgentTask{
 				ID:          strconv.FormatUint(uint64(item.ID), 10),
 				WorkspaceID: formatWorkspaceID(item.WorkspaceID),
 				RunID:       item.RunID,
-				PlanID:      item.PlanID,
-				PlanStepID:  item.PlanStepID,
 				SubAgent:    item.SubAgent,
 				Goal:        item.Goal,
-				Status:      PlanStepStatus(item.Status),
+				Status:      RuntimeTaskStatus(item.Status),
 				UpdatedAt:   item.UpdatedAt.UnixMilli(),
 			})
 		}
@@ -583,7 +529,7 @@ func (d *ExplorationDomain) loadV1Intervention(workspaceID string, interventionI
 	if d.DB == nil || workspaceID == "" || interventionID == "" {
 		return InterventionView{}, false
 	}
-	event, err := d.DB.GetInterventionEvent(workspaceID, interventionID)
+	event, err := d.DB.GetLatestInterventionEventByTarget(workspaceID, interventionID, "v1_intervention_snapshot")
 	if err != nil || event == nil || event.Type != "v1_intervention_snapshot" {
 		return InterventionView{}, false
 	}

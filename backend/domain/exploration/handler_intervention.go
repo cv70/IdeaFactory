@@ -73,7 +73,6 @@ func (d *ExplorationDomain) ApiV1ListInterventionEvents(c *gin.Context) {
 	if status != "" &&
 		status != InterventionReceived &&
 		status != InterventionAbsorbed &&
-		status != InterventionReplanned &&
 		status != InterventionReflected {
 		writeV1Error(c, http.StatusBadRequest, "invalid_argument", "invalid status")
 		return
@@ -159,11 +158,6 @@ func (d *ExplorationDomain) advanceInterventionByRuntimeEvent(workspaceID string
 		if len(state.Runs) > 0 && view.Status == InterventionReceived {
 			view.Status = InterventionAbsorbed
 			view.AbsorbedByRunID = state.Runs[len(state.Runs)-1].ID
-			view.UpdatedAt = toRFC3339(now)
-		}
-		if len(state.Plans) > 0 && (view.Status == InterventionReceived || view.Status == InterventionAbsorbed) {
-			view.Status = InterventionReplanned
-			view.ReplannedPlanID = state.Plans[len(state.Plans)-1].ID
 			view.UpdatedAt = toRFC3339(now)
 		}
 		if len(mutations) > 0 {

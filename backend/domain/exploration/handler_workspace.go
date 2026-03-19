@@ -22,8 +22,7 @@ func (d *ExplorationDomain) ApiV1CreateWorkspace(c *gin.Context) {
 		utils.RespError(c, http.StatusInternalServerError, "failed to create workspace")
 		return
 	}
-	d.initializeWorkspaceGraph(c.Request.Context(), snapshot.Exploration.ID)
-	// Re-fetch so the response includes seeded Direction nodes.
+	// Re-fetch so the response includes any initial run-side mutations applied during creation.
 	if updated, ok := d.GetWorkspace(snapshot.Exploration.ID); ok {
 		snapshot = updated
 	}
@@ -100,7 +99,7 @@ func (d *ExplorationDomain) ApiV1PatchWorkspace(c *gin.Context) {
 			}
 		}
 		// Start a run immediately; subsequent runs will use IntervalMs from strategy.
-		d.triggerRun(ctx, workspaceID, "resume")
+		d.triggerRun(ctx, workspaceID, string(RunSourceResume))
 		dbState = nil // PausedAt is nil → status = active
 	}
 

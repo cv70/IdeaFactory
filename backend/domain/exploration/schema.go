@@ -21,13 +21,13 @@ const (
 type EdgeType string
 
 const (
-	EdgeSupports    EdgeType = "supports"
-	EdgeRefines     EdgeType = "refines"
-	EdgeLeadsTo     EdgeType = "leads_to"
-	EdgeExpands     EdgeType = "expands"
-	EdgeContradicts EdgeType = "contradicts"
-	EdgeQuestions   EdgeType = "questions"
-	EdgeExplains    EdgeType = "explains"
+	EdgeSupports     EdgeType = "supports"
+	EdgeRefines      EdgeType = "refines"
+	EdgeLeadsTo      EdgeType = "leads_to"
+	EdgeExpands      EdgeType = "expands"
+	EdgeContradicts  EdgeType = "contradicts"
+	EdgeQuestions    EdgeType = "questions"
+	EdgeExplains     EdgeType = "explains"
 	EdgeWeakens      EdgeType = "weakens"
 	EdgeJustifies    EdgeType = "justifies"
 	EdgeBranchesFrom EdgeType = "branches_from"
@@ -112,45 +112,24 @@ type Run struct {
 	EndedAt     int64     `json:"ended_at,omitempty"`
 }
 
-type PlanStepStatus string
+type RuntimeTaskStatus string
 
 const (
-	PlanStepTodo    PlanStepStatus = "todo"
-	PlanStepDoing   PlanStepStatus = "doing"
-	PlanStepDone    PlanStepStatus = "done"
-	PlanStepFailed  PlanStepStatus = "failed"
-	PlanStepSkipped PlanStepStatus = "skipped"
+	RuntimeTaskTodo    RuntimeTaskStatus = "todo"
+	RuntimeTaskDoing   RuntimeTaskStatus = "doing"
+	RuntimeTaskDone    RuntimeTaskStatus = "done"
+	RuntimeTaskFailed  RuntimeTaskStatus = "failed"
+	RuntimeTaskSkipped RuntimeTaskStatus = "skipped"
 )
 
-type ExecutionPlan struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	RunID       string `json:"run_id"`
-	Version     int    `json:"version"`
-	CreatedAt   int64  `json:"created_at"`
-}
-
-type PlanStep struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspace_id"`
-	RunID       string         `json:"run_id"`
-	PlanID      string         `json:"plan_id"`
-	Index       int            `json:"index"`
-	Desc        string         `json:"desc"`
-	Status      PlanStepStatus `json:"status"`
-	UpdatedAt   int64          `json:"updated_at"`
-}
-
 type AgentTask struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspace_id"`
-	RunID       string         `json:"run_id"`
-	PlanID      string         `json:"plan_id"`
-	PlanStepID  string         `json:"plan_step_id"`
-	SubAgent    string         `json:"sub_agent"`
-	Goal        string         `json:"goal"`
-	Status      PlanStepStatus `json:"status"`
-	UpdatedAt   int64          `json:"updated_at"`
+	ID          string            `json:"id"`
+	WorkspaceID string            `json:"workspace_id"`
+	RunID       string            `json:"run_id"`
+	SubAgent    string            `json:"sub_agent"`
+	Goal        string            `json:"goal"`
+	Status      RuntimeTaskStatus `json:"status"`
+	UpdatedAt   int64             `json:"updated_at"`
 }
 
 type AgentTaskResultSummary struct {
@@ -172,10 +151,9 @@ type BalanceState struct {
 
 type RuntimeStateSnapshot struct {
 	Runs               []Run                    `json:"runs"`
-	Plans              []ExecutionPlan          `json:"plans"`
-	PlanSteps          []PlanStep               `json:"plan_steps"`
 	AgentTasks         []AgentTask              `json:"agent_tasks"`
 	Results            []AgentTaskResultSummary `json:"results"`
+	Mutations          []MutationEvent          `json:"mutations,omitempty"`
 	Balance            BalanceState             `json:"balance"`
 	LatestReplanReason string                   `json:"latest_replan_reason,omitempty"`
 }
@@ -335,28 +313,12 @@ type WorkspaceResponse struct {
 }
 
 type RunView struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	TriggerType string    `json:"trigger_type"`
-	Status      string    `json:"status"`
-	StartedAt   string    `json:"started_at"`
-	FinishedAt  string    `json:"finished_at,omitempty"`
-	CurrentPlan *PlanView `json:"current_plan,omitempty"`
-}
-
-type PlanView struct {
-	ID      string       `json:"id"`
-	Version int          `json:"version"`
-	Status  string       `json:"status"`
-	Steps   []PlanStepV1 `json:"steps,omitempty"`
-}
-
-type PlanStepV1 struct {
-	ID            string `json:"id"`
-	Order         int    `json:"order"`
-	Kind          string `json:"kind"`
-	AssignedAgent string `json:"assigned_agent"`
-	Status        string `json:"status"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	TriggerType string `json:"trigger_type"`
+	Status      string `json:"status"`
+	StartedAt   string `json:"started_at"`
+	FinishedAt  string `json:"finished_at,omitempty"`
 }
 
 type RunResponse struct {
@@ -424,7 +386,6 @@ type InterventionView struct {
 	Intent           string                      `json:"intent"`
 	Status           InterventionLifecycleStatus `json:"status"`
 	AbsorbedByRunID  string                      `json:"absorbed_by_run_id,omitempty"`
-	ReplannedPlanID  string                      `json:"replanned_plan_id,omitempty"`
 	ReflectedEventID string                      `json:"reflected_event_id,omitempty"`
 	CreatedAt        string                      `json:"created_at"`
 	UpdatedAt        string                      `json:"updated_at"`

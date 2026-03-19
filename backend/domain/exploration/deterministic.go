@@ -7,65 +7,12 @@ import (
 	"time"
 )
 
-// DeterministicPlanner implements Planner without any LLM calls.
-// Node generation is deterministic, based solely on graph state and BalanceState.
+// DeterministicPlanner is a compatibility graph generator with no LLM calls.
+// It remains only for tests and limited bootstrap helpers.
 type DeterministicPlanner struct{}
-
-// Compile-time interface check
-var _ Planner = &DeterministicPlanner{}
 
 func NewDeterministicPlanner() *DeterministicPlanner {
 	return &DeterministicPlanner{}
-}
-
-// BuildInitialPlan creates a 3-step plan skeleton. Node generation happens
-// separately via GenerateNodesForCycle.
-func (p *DeterministicPlanner) BuildInitialPlan(ctx context.Context, session *ExplorationSession, state *RuntimeWorkspaceState) (*ExecutionPlan, []PlanStep, error) {
-	return p.buildPlan(ctx, session, state, 1)
-}
-
-// Replan creates a new plan version after a trigger.
-func (p *DeterministicPlanner) Replan(ctx context.Context, session *ExplorationSession, state *RuntimeWorkspaceState, trigger ReplanTrigger) (*ExecutionPlan, []PlanStep, error) {
-	version := 1
-	if len(state.Plans) > 0 {
-		version = state.Plans[len(state.Plans)-1].Version + 1
-	}
-	return p.buildPlan(ctx, session, state, version)
-}
-
-func (p *DeterministicPlanner) buildPlan(_ context.Context, session *ExplorationSession, state *RuntimeWorkspaceState, version int) (*ExecutionPlan, []PlanStep, error) {
-	now := time.Now()
-	planID := fmt.Sprintf("plan-%s-%d", session.ID, now.UnixNano())
-	runID := ""
-	if len(state.Runs) > 0 {
-		runID = state.Runs[len(state.Runs)-1].ID
-	}
-	plan := &ExecutionPlan{
-		ID:          planID,
-		WorkspaceID: session.ID,
-		RunID:       runID,
-		Version:     version,
-		CreatedAt:   now.UnixMilli(),
-	}
-	descs := []string{
-		"generate directions and evidence nodes",
-		"synthesize claims from evidence",
-		"produce decisions and artifacts",
-	}
-	steps := make([]PlanStep, len(descs))
-	for i, desc := range descs {
-		steps[i] = PlanStep{
-			ID:          fmt.Sprintf("%s-step-%d", planID, i+1),
-			WorkspaceID: session.ID,
-			RunID:       runID,
-			PlanID:      planID,
-			Index:       i + 1,
-			Desc:        desc,
-			Status:      PlanStepTodo,
-			UpdatedAt:   now.UnixMilli(),
-		}
-	}
-	return plan, steps, nil
 }
 
 // GenerateNodesForCycle applies the 7-rule priority table from the spec to determine

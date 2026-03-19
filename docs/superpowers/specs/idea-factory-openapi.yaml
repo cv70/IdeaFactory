@@ -3,7 +3,7 @@ info:
   title: Idea Factory API
   version: 1.0.0-target
   description: |
-    Target-state API contract for workspace governance and run orchestration.
+    Target-state API contract for workspace governance and MainAgent-driven graph runtime.
 servers:
   - url: /v1
 tags:
@@ -86,6 +86,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
+        '404': { $ref: '#/components/responses/NotFound' }
+  /workspaces/{workspaceId}/runtime:
+    get:
+      tags: [Runs]
+      summary: Get runtime state
+      operationId: getRuntimeState
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: run_id
+          in: query
+          schema: { type: string }
+        - name: latest_runs
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Runtime state snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeStateResponse'
         '404': { $ref: '#/components/responses/NotFound' }
   /workspaces/{workspaceId}/projection:
     get:
@@ -209,7 +230,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [plan, task, tool, projection, intervention, balance]
+            enum: [run, tool, mutation, projection, intervention, balance]
         - name: level
           in: query
           schema:
@@ -264,19 +285,10 @@ components:
       enum: [draft, active, paused, archived]
     RunStatus:
       type: string
-      enum: [queued, planning, dispatching, integrating, projected, completed, failed, cancelled]
-    PlanStatus:
-      type: string
-      enum: [draft, active, superseded, completed, failed]
-    PlanStepStatus:
-      type: string
-      enum: [todo, doing, done, failed, skipped, invalidated]
-    TaskStatus:
-      type: string
-      enum: [queued, running, succeeded, failed, timeout]
+      enum: [queued, running, completed, failed]
     InterventionStatus:
       type: string
-      enum: [received, absorbed, replanned, reflected, rejected]
+      enum: [received, absorbed, reflected, rejected]
     GraphNodeType:
       type: string
       enum: [direction, evidence, claim, decision, unknown, artifact]
@@ -337,7 +349,7 @@ components:
       properties:
         trigger:
           type: string
-          enum: [manual, scheduled, intervention]
+          enum: [manual, auto, resume]
         notes:
           type: string
     RunResponse:
@@ -352,28 +364,109 @@ components:
             workspace_id: { type: string }
             trigger_type:
               type: string
-              enum: [manual, scheduled, intervention, bootstrap]
+              enum: [manual, auto, resume, workspace_create, workspace_load, workspace_read]
             status:
               $ref: '#/components/schemas/RunStatus'
             started_at: { type: string, format: date-time }
             finished_at: { type: string, format: date-time, nullable: true }
-            current_plan:
-              type: object
-              nullable: true
-              properties:
-                id: { type: string }
-                version: { type: integer, minimum: 1 }
-                status: { $ref: '#/components/schemas/PlanStatus' }
-                steps:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      id: { type: string }
-                      order: { type: integer, minimum: 1 }
-                      kind: { type: string }
-                      assigned_agent: { type: string, enum: [research, graph, artifact, general] }
-                      status: { $ref: '#/components/schemas/PlanStepStatus' }
+    RuntimeStateResponse:
+      type: object
+      required: [runtime]
+      properties:
+        runtime:
+          $ref: '#/components/schemas/RuntimeState'
+    RuntimeState:
+      type: object
+      required: [runs, agent_tasks, results, balance]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeRun'
+        agent_tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeAgentTask'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeTaskResult'
+        mutations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeMutation'
+        balance:
+          $ref: '#/components/schemas/BalanceState'
+        latest_replan_reason:
+          type: string
+          nullable: true
+    RuntimeRun:
+      type: object
+      required: [id, workspace_id, source, status, started_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        source:
+          type: string
+          enum: [manual, auto, resume, workspace_create, workspace_load, workspace_read]
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        started_at: { type: integer }
+        ended_at: { type: integer, nullable: true }
+    RuntimeAgentTask:
+      type: object
+      required: [id, workspace_id, run_id, sub_agent, goal, status, updated_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        run_id: { type: string }
+        sub_agent: { type: string }
+        goal: { type: string }
+        status:
+          type: string
+          enum: [todo, doing, done, failed, skipped]
+        updated_at: { type: integer }
+    RuntimeTaskResult:
+      type: object
+      required: [task_id, summary, is_success, updated_at]
+      properties:
+        task_id: { type: string }
+        summary: { type: string }
+        is_success: { type: boolean }
+        updated_at: { type: integer }
+    RuntimeMutation:
+      type: object
+      required: [id, workspace_id, kind, created_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        kind:
+          type: string
+          enum:
+            - run_created
+            - run_completed
+            - run_failed
+            - node_added
+            - edge_added
+            - intervention_absorbed
+            - balance_updated
+            - active_opportunity_set
+            - favorites_updated
+            - strategy_updated
+        source: { type: string, nullable: true }
+        created_at: { type: integer }
+    BalanceState:
+      type: object
+      required: [workspace_id, run_id, divergence, research, aggression, reason, updated_at]
+      properties:
+        workspace_id: { type: string }
+        run_id: { type: string }
+        divergence: { type: number }
+        research: { type: number }
+        aggression: { type: number }
+        reason: { type: string }
+        updated_at: { type: integer }
     CreateInterventionRequest:
       type: object
       required: [intent]
@@ -397,7 +490,6 @@ components:
             intent: { type: string }
             status: { $ref: '#/components/schemas/InterventionStatus' }
             absorbed_by_run_id: { type: string, nullable: true }
-            replanned_plan_id: { type: string, nullable: true }
             reflected_event_id: { type: string, nullable: true }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
@@ -522,7 +614,7 @@ components:
               level: { type: string, enum: [info, warn, error] }
               category:
                 type: string
-                enum: [plan, task, tool, projection, intervention, balance]
+                enum: [run, tool, mutation, projection, intervention, balance]
               message: { type: string }
               related_ids:
                 type: array
@@ -543,7 +635,7 @@ components:
               level: { type: string, enum: [info, warn, error] }
               category:
                 type: string
-                enum: [plan, task, tool, projection, intervention, balance]
+                enum: [run, tool, mutation, projection, intervention, balance]
               message: { type: string }
               related_ids:
                 type: array

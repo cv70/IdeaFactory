@@ -1,6 +1,10 @@
 package dbdao
 
-import "gorm.io/gorm"
+import (
+	"strings"
+
+	"gorm.io/gorm"
+)
 
 type InterventionEvent struct {
 	gorm.Model
@@ -32,13 +36,30 @@ func (d *DB) GetInterventionEvent(workspaceID string, id string) (*InterventionE
 	return &event, nil
 }
 
+func (d *DB) GetLatestInterventionEventByTarget(workspaceID string, targetID string, eventType string) (*InterventionEvent, error) {
+	var event InterventionEvent
+	err := d.DB().
+		Where("workspace_id = ? AND target_id = ?", workspaceID, targetID).
+		Where("type = ?", eventType).
+		Order("created_at desc, id desc").
+		First(&event).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &event, nil
+}
+
 func (d *DB) ListInterventionEventsByPrefix(workspaceID string, idPrefix string, eventType string, limit int) ([]InterventionEvent, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	query := d.DB().Where("workspace_id = ?", workspaceID)
 	if idPrefix != "" {
-		query = query.Where("id LIKE ?", idPrefix+"%")
+		idPrefix = strings.TrimSuffix(idPrefix, "#")
+		query = query.Where("target_id LIKE ?", idPrefix+"%")
 	}
 	if eventType != "" {
 		query = query.Where("type = ?", eventType)

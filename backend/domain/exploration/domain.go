@@ -1,6 +1,7 @@
 package exploration
 
 import (
+	"backend/agentools"
 	"backend/agents"
 	"backend/datasource/dbdao"
 	"backend/infra"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/gorilla/websocket"
 )
 
@@ -17,18 +19,14 @@ import (
 // Access exclusively via withWorkspaceState.
 type RuntimeWorkspaceState struct {
 	Runs            []Run
-	Plans           []ExecutionPlan
-	PlanSteps       []PlanStep
 	AgentTasks      []AgentTask
 	Results         []AgentTaskResultSummary
 	Balance         BalanceState
 	Mutations       []MutationEvent
 	ReplanReason    string
 	Interventions   map[string]InterventionView // keyed by intervention ID
-	Running         bool
-	AgentRunning    bool // true while runAgentCycle goroutine is active
-	Cursor          int
-	cancelScheduler context.CancelFunc // non-nil while a scheduler goroutine is pending the next run
+	AgentRunning    bool                        // true while runAgentCycle goroutine is active
+	cancelScheduler context.CancelFunc          // non-nil while a scheduler goroutine is pending the next run
 }
 
 type workspaceStore struct {
@@ -52,14 +50,13 @@ type runtimeWorkspaces struct {
 }
 
 type ExplorationDomain struct {
-	DB        *dbdao.DB
-	DeepAgent adk.ResumableAgent
-	General   adk.Agent
-	Model     model.ToolCallingChatModel
-	store     *workspaceStore
-	ws        *wsState
-	planner   Planner
-	runtime   *runtimeWorkspaces
+	DB              *dbdao.DB
+	DeepAgent       adk.ResumableAgent
+	Model           model.ToolCallingChatModel
+	GraphAppendTool tool.InvokableTool
+	store           *workspaceStore
+	ws              *wsState
+	runtime         *runtimeWorkspaces
 }
 
 // getWorkspaceState returns the state for workspaceID, initializing it if absent.
@@ -99,26 +96,10 @@ func BuildExplorationDomain(registry *infra.Registry) (*ExplorationDomain, error
 			workspaces: map[string]*RuntimeWorkspaceState{},
 		},
 	}
+	domain.GraphAppendTool = agentools.NewAppendGraphBatchTool(domain)
 
-	g, err := agents.NewGeneralAgent(ctx, registry.Model)
-	if err != nil {
-		return nil, err
-	}
-	r, err := agents.NewResearchAgent(ctx, registry.Model)
-	if err != nil {
-		return nil, err
-	}
-	gr, err := agents.NewGraphAgent(ctx, registry.Model)
-	if err != nil {
-		return nil, err
-	}
-	a, err := agents.NewArtifactAgent(ctx, registry.Model)
-	if err != nil {
-		return nil, err
-	}
-	domain.planner = NewLLMPlanner(g, r, gr, a)
-	domain.General = g
-	domain.DeepAgent, err = agents.NewExplorationAgent(ctx, registry.Model)
+	var err error
+	domain.DeepAgent, err = agents.NewExplorationAgent(ctx, registry.Model, domain.GraphAppendTool)
 	return domain, err
 }
 

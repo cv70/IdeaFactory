@@ -17,7 +17,7 @@ func diffMutations(prev ExplorationSession, next ExplorationSession, source stri
 		out = append(out, MutationEvent{
 			ID:                  mutationID(next.ID),
 			WorkspaceID:         next.ID,
-			Kind:                "active_opportunity_set",
+			Kind:                string(MutationKindActiveOpportunitySet),
 			Source:              source,
 			ActiveOpportunityID: next.ActiveOpportunityID,
 			CreatedAt:           time.Now().UnixMilli(),
@@ -36,7 +36,7 @@ func diffMutations(prev ExplorationSession, next ExplorationSession, source stri
 		out = append(out, MutationEvent{
 			ID:          mutationID(next.ID),
 			WorkspaceID: next.ID,
-			Kind:        "node_added",
+			Kind:        string(MutationKindNodeAdded),
 			Source:      source,
 			Node:        &copyNode,
 			CreatedAt:   time.Now().UnixMilli(),
@@ -55,7 +55,7 @@ func diffMutations(prev ExplorationSession, next ExplorationSession, source stri
 		out = append(out, MutationEvent{
 			ID:          mutationID(next.ID),
 			WorkspaceID: next.ID,
-			Kind:        "edge_added",
+			Kind:        string(MutationKindEdgeAdded),
 			Source:      source,
 			Edge:        &copyEdge,
 			CreatedAt:   time.Now().UnixMilli(),
@@ -80,7 +80,7 @@ func diffMutations(prev ExplorationSession, next ExplorationSession, source stri
 		out = append(out, MutationEvent{
 			ID:          mutationID(next.ID),
 			WorkspaceID: next.ID,
-			Kind:        "favorites_updated",
+			Kind:        string(MutationKindFavoritesUpdated),
 			Source:      source,
 			Favorites:   append([]string{}, next.Favorites...),
 			CreatedAt:   time.Now().UnixMilli(),
@@ -92,7 +92,7 @@ func diffMutations(prev ExplorationSession, next ExplorationSession, source stri
 		out = append(out, MutationEvent{
 			ID:          mutationID(next.ID),
 			WorkspaceID: next.ID,
-			Kind:        "strategy_updated",
+			Kind:        string(MutationKindStrategyUpdated),
 			Source:      source,
 			Strategy:    &strategy,
 			CreatedAt:   time.Now().UnixMilli(),
