@@ -1327,6 +1327,26 @@ func TestV1RunResponseUsesSimplifiedAgentDrivenShape(t *testing.T) {
 	if runResp.Run.Status == "" {
 		t.Fatal("expected run status")
 	}
+
+	time.Sleep(150 * time.Millisecond)
+
+	getRunReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+created.Workspace.ID+"/runs/"+runResp.Run.ID, nil)
+	getRunW := httptest.NewRecorder()
+	r.ServeHTTP(getRunW, getRunReq)
+	if getRunW.Code != http.StatusOK {
+		t.Fatalf("get run: expected 200, got %d body=%s", getRunW.Code, getRunW.Body.String())
+	}
+
+	var fetched RunResponse
+	if err := json.Unmarshal(getRunW.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("decode fetched run: %v", err)
+	}
+	if fetched.Run.TurnCount == 0 {
+		t.Fatalf("expected turn_count in fetched run, got %+v", fetched.Run)
+	}
+	if fetched.Run.LatestTurnID == "" || fetched.Run.LatestCheckpointID == "" || fetched.Run.ResumeCursor == "" {
+		t.Fatalf("expected turn/checkpoint metadata in fetched run, got %+v", fetched.Run)
+	}
 }
 
 func TestV1TraceSummaryUsesRunToolMutationCategories(t *testing.T) {

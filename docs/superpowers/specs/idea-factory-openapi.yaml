@@ -1,17 +1,20 @@
 openapi: 3.1.0
 info:
   title: Idea Factory API
-  version: 1.0.0-target
+  version: 1.1.0-target
   description: |
-    Target-state API contract for workspace governance and MainAgent-driven graph runtime.
+    Target-state API contract for workspace governance, control-plane actions,
+    turn-level runtime, and MainAgent-driven graph runtime.
 servers:
   - url: /v1
 tags:
   - name: Workspaces
   - name: Runs
+  - name: Control
   - name: Projections
-  - name: Interventions
   - name: Trace
+  - name: Memory
+  - name: Skills
 paths:
   /workspaces:
     post:
@@ -33,7 +36,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceResponse'
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /workspaces/{workspaceId}:
     get:
       tags: [Workspaces]
@@ -48,7 +52,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/runs:
     post:
       tags: [Runs]
@@ -70,7 +75,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/runs/{runId}:
     get:
       tags: [Runs]
@@ -86,7 +92,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/runs/{runId}/turns:
+    get:
+      tags: [Runs]
+      summary: List run turns
+      operationId: listRunTurns
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/RunId'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: Run turns
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunTurnsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/runs/{runId}/checkpoints:
+    get:
+      tags: [Runs]
+      summary: List run checkpoints
+      operationId: listRunCheckpoints
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run checkpoints
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunCheckpointsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/runtime:
     get:
       tags: [Runs]
@@ -96,10 +148,13 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: run_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
         - name: latest_runs
           in: query
-          schema: { type: integer, minimum: 1 }
+          schema:
+            type: integer
+            minimum: 1
       responses:
         '200':
           description: Runtime state snapshot
@@ -107,7 +162,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RuntimeStateResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/projection:
     get:
       tags: [Projections]
@@ -117,7 +173,8 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: since_event_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Projection snapshot
@@ -125,12 +182,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProjectionResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
-  /workspaces/{workspaceId}/interventions:
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/control-actions:
     post:
-      tags: [Interventions]
-      summary: Submit intervention
-      operationId: createIntervention
+      tags: [Control]
+      summary: Submit control action
+      operationId: createControlAction
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -139,58 +197,97 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateInterventionRequest'
+              $ref: '#/components/schemas/CreateControlActionRequest'
       responses:
         '202':
-          description: Intervention accepted
+          description: Control action accepted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InterventionResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
-  /workspaces/{workspaceId}/interventions/{interventionId}:
+                $ref: '#/components/schemas/ControlActionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/control-actions/{controlActionId}:
     get:
-      tags: [Interventions]
-      summary: Get intervention status
-      operationId: getIntervention
+      tags: [Control]
+      summary: Get control action status
+      operationId: getControlAction
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/InterventionId'
+        - $ref: '#/components/parameters/ControlActionId'
       responses:
         '200':
-          description: Intervention status
+          description: Control action detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InterventionResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
-  /workspaces/{workspaceId}/interventions/{interventionId}/events:
+                $ref: '#/components/schemas/ControlActionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/control-actions/{controlActionId}/events:
     get:
-      tags: [Interventions]
-      summary: List intervention lifecycle events
-      operationId: listInterventionEvents
+      tags: [Control]
+      summary: List control action lifecycle events
+      operationId: listControlActionEvents
       parameters:
         - $ref: '#/components/parameters/WorkspaceId'
-        - $ref: '#/components/parameters/InterventionId'
+        - $ref: '#/components/parameters/ControlActionId'
         - name: cursor
           in: query
-          schema: { type: string }
-          description: Cursor from previous page in format `RFC3339|event_id`.
+          schema:
+            type: string
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
-        - name: status
-          in: query
           schema:
-            $ref: '#/components/schemas/InterventionStatus'
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
       responses:
         '200':
-          description: Intervention lifecycle events
+          description: Control action lifecycle events
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InterventionEventsResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+                $ref: '#/components/schemas/ControlActionEventsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/memory:
+    get:
+      tags: [Memory]
+      summary: List workspace memories
+      operationId: listWorkspaceMemories
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+        - name: scope
+          in: query
+          schema:
+            $ref: '#/components/schemas/MemoryScope'
+      responses:
+        '200':
+          description: Workspace memories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceMemoriesResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /workspaces/{workspaceId}/skills:
+    get:
+      tags: [Skills]
+      summary: List workspace skill bindings
+      operationId: listWorkspaceSkillBindings
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '200':
+          description: Workspace skill bindings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillBindingsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/trace/summary:
     get:
       tags: [Trace]
@@ -200,7 +297,8 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: run_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
       responses:
         '200':
           description: Trace summary
@@ -208,7 +306,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TraceSummaryResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
   /workspaces/{workspaceId}/trace/events:
     get:
       tags: [Trace]
@@ -218,19 +317,29 @@ paths:
         - $ref: '#/components/parameters/WorkspaceId'
         - name: run_id
           in: query
-          schema: { type: string }
+          schema:
+            type: string
+        - name: turn_id
+          in: query
+          schema:
+            type: string
         - name: cursor
           in: query
-          schema: { type: string }
+          schema:
+            type: string
           description: Cursor from previous page in format `RFC3339|event_id`.
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
         - name: category
           in: query
           schema:
             type: string
-            enum: [run, tool, mutation, projection, intervention, balance]
+            enum: [run, turn, tool, approval, mutation, projection, control_action, memory, skill, balance]
         - name: level
           in: query
           schema:
@@ -243,29 +352,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TraceEventsResponse'
-        '404': { $ref: '#/components/responses/NotFound' }
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   parameters:
     WorkspaceId:
       name: workspaceId
       in: path
       required: true
-      schema: { type: string }
+      schema:
+        type: string
     RunId:
       name: runId
       in: path
       required: true
-      schema: { type: string }
-    InterventionId:
-      name: interventionId
+      schema:
+        type: string
+    ControlActionId:
+      name: controlActionId
       in: path
       required: true
-      schema: { type: string }
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: false
-      schema: { type: string, minLength: 8, maxLength: 128 }
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
   responses:
     BadRequest:
       description: Invalid request
@@ -285,16 +401,37 @@ components:
       enum: [draft, active, paused, archived]
     RunStatus:
       type: string
-      enum: [queued, running, completed, failed]
-    InterventionStatus:
+      enum: [queued, running, waiting, completed, failed, cancelled]
+    TurnStatus:
+      type: string
+      enum: [queued, running, completed, failed, superseded]
+    ControlActionStatus:
       type: string
       enum: [received, absorbed, reflected, rejected]
+    ControlActionKind:
+      type: string
+      enum: [intervention, review_request, artifact_request, resume_request, policy_adjustment, memory_pin]
+    ControlActionPriority:
+      type: string
+      enum: [low, medium, high]
+    RunMode:
+      type: string
+      enum: [explore, review, artifact, resume]
+    WaitingReason:
+      type: string
+      enum: [approval, review, external_input, scheduled_resume, idle]
     GraphNodeType:
       type: string
       enum: [direction, evidence, claim, decision, unknown, artifact]
     DirectionMaturity:
       type: string
       enum: [emerging, developing, mature, saturated, folded]
+    MemoryScope:
+      type: string
+      enum: [run_working, workspace, user_preference]
+    SkillBindingStatus:
+      type: string
+      enum: [active, inactive, draft]
     ErrorResponse:
       type: object
       required: [error]
@@ -305,7 +442,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_argument, not_found, conflict, too_many_requests, internal]
+              enum: [invalid_argument, not_found, conflict, approval_required, too_many_requests, internal]
             message:
               type: string
             details:
@@ -316,16 +453,40 @@ components:
       type: object
       required: [topic, goal]
       properties:
-        topic: { type: string, minLength: 1 }
-        goal: { type: string, minLength: 1 }
+        topic:
+          type: string
+          minLength: 1
+        goal:
+          type: string
+          minLength: 1
         constraints:
           type: array
-          items: { type: string }
+          items:
+            type: string
         budget:
           type: object
           properties:
-            max_runs: { type: integer, minimum: 1 }
-            timebox_minutes: { type: integer, minimum: 1 }
+            max_runs:
+              type: integer
+              minimum: 1
+            timebox_minutes:
+              type: integer
+              minimum: 1
+        charter:
+          type: object
+          properties:
+            objectives:
+              type: array
+              items:
+                type: string
+            non_goals:
+              type: array
+              items:
+                type: string
+            preferences:
+              type: array
+              items:
+                type: string
     WorkspaceResponse:
       type: object
       required: [workspace]
@@ -334,22 +495,40 @@ components:
           type: object
           required: [id, topic, goal, status, created_at, updated_at]
           properties:
-            id: { type: string }
-            topic: { type: string }
-            goal: { type: string }
+            id:
+              type: string
+            topic:
+              type: string
+            goal:
+              type: string
             constraints:
               type: array
-              items: { type: string }
+              items:
+                type: string
             status:
               $ref: '#/components/schemas/WorkspaceStatus'
-            created_at: { type: string, format: date-time }
-            updated_at: { type: string, format: date-time }
+            charter:
+              type: object
+              additionalProperties: true
+            active_policy_id:
+              type: string
+              nullable: true
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
     CreateRunRequest:
       type: object
       properties:
         trigger:
           type: string
           enum: [manual, auto, resume]
+        mode:
+          $ref: '#/components/schemas/RunMode'
+        checkpoint_id:
+          type: string
         notes:
           type: string
     RunResponse:
@@ -358,17 +537,120 @@ components:
       properties:
         run:
           type: object
-          required: [id, workspace_id, status, trigger_type, started_at]
+          required: [id, workspace_id, status, trigger_type, mode, started_at]
           properties:
-            id: { type: string }
-            workspace_id: { type: string }
+            id:
+              type: string
+            workspace_id:
+              type: string
             trigger_type:
               type: string
-              enum: [manual, auto, resume, workspace_create, workspace_load, workspace_read]
+              enum: [manual, auto, resume, workspace_create, control_action]
+            mode:
+              $ref: '#/components/schemas/RunMode'
             status:
               $ref: '#/components/schemas/RunStatus'
-            started_at: { type: string, format: date-time }
-            finished_at: { type: string, format: date-time, nullable: true }
+            waiting_reason:
+              allOf:
+                - $ref: '#/components/schemas/WaitingReason'
+              nullable: true
+            started_at:
+              type: string
+              format: date-time
+            finished_at:
+              type: string
+              format: date-time
+              nullable: true
+            latest_turn_id:
+              type: string
+              nullable: true
+            latest_checkpoint_id:
+              type: string
+              nullable: true
+    RunTurn:
+      type: object
+      required: [id, run_id, workspace_id, index, status, started_at]
+      properties:
+        id:
+          type: string
+        run_id:
+          type: string
+        workspace_id:
+          type: string
+        index:
+          type: integer
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/TurnStatus'
+        input_context_digest:
+          type: string
+          nullable: true
+        continue_reason:
+          type: string
+          nullable: true
+        tool_call_count:
+          type: integer
+          minimum: 0
+        graph_mutation_count:
+          type: integer
+          minimum: 0
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+    RunTurnsResponse:
+      type: object
+      required: [workspace_id, run_id, items, has_more]
+      properties:
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTurn'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+    RunCheckpoint:
+      type: object
+      required: [id, workspace_id, run_id, turn_id, created_at]
+      properties:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+        turn_id:
+          type: string
+        label:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    RunCheckpointsResponse:
+      type: object
+      required: [workspace_id, run_id, items]
+      properties:
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunCheckpoint'
     RuntimeStateResponse:
       type: object
       required: [runtime]
@@ -377,24 +659,32 @@ components:
           $ref: '#/components/schemas/RuntimeState'
     RuntimeState:
       type: object
-      required: [runs, agent_tasks, results, balance]
+      required: [runs, turns, mutations, balance, control_actions]
       properties:
         runs:
           type: array
           items:
             $ref: '#/components/schemas/RuntimeRun'
-        agent_tasks:
+        turns:
           type: array
           items:
-            $ref: '#/components/schemas/RuntimeAgentTask'
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/RuntimeTaskResult'
+            $ref: '#/components/schemas/RunTurn'
         mutations:
           type: array
           items:
             $ref: '#/components/schemas/RuntimeMutation'
+        control_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ControlAction'
+        loaded_skills:
+          type: array
+          items:
+            type: string
+        active_memories:
+          type: array
+          items:
+            type: string
         balance:
           $ref: '#/components/schemas/BalanceState'
         latest_replan_reason:
@@ -402,118 +692,235 @@ components:
           nullable: true
     RuntimeRun:
       type: object
-      required: [id, workspace_id, source, status, started_at]
+      required: [id, workspace_id, source, mode, status, started_at]
       properties:
-        id: { type: string }
-        workspace_id: { type: string }
+        id:
+          type: string
+        workspace_id:
+          type: string
         source:
           type: string
-          enum: [manual, auto, resume, workspace_create, workspace_load, workspace_read]
+          enum: [manual, auto, resume, workspace_create, control_action]
+        mode:
+          $ref: '#/components/schemas/RunMode'
         status:
-          type: string
-          enum: [pending, running, completed, failed]
-        started_at: { type: integer }
-        ended_at: { type: integer, nullable: true }
-    RuntimeAgentTask:
-      type: object
-      required: [id, workspace_id, run_id, sub_agent, goal, status, updated_at]
-      properties:
-        id: { type: string }
-        workspace_id: { type: string }
-        run_id: { type: string }
-        sub_agent: { type: string }
-        goal: { type: string }
-        status:
-          type: string
-          enum: [todo, doing, done, failed, skipped]
-        updated_at: { type: integer }
-    RuntimeTaskResult:
-      type: object
-      required: [task_id, summary, is_success, updated_at]
-      properties:
-        task_id: { type: string }
-        summary: { type: string }
-        is_success: { type: boolean }
-        updated_at: { type: integer }
+          $ref: '#/components/schemas/RunStatus'
+        waiting_reason:
+          allOf:
+            - $ref: '#/components/schemas/WaitingReason'
+          nullable: true
+        started_at:
+          type: integer
+        ended_at:
+          type: integer
+          nullable: true
     RuntimeMutation:
       type: object
       required: [id, workspace_id, kind, created_at]
       properties:
-        id: { type: string }
-        workspace_id: { type: string }
+        id:
+          type: string
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+          nullable: true
+        turn_id:
+          type: string
+          nullable: true
         kind:
           type: string
           enum:
             - run_created
+            - run_waiting
             - run_completed
             - run_failed
+            - turn_started
+            - turn_completed
+            - checkpoint_created
             - node_added
             - edge_added
-            - intervention_absorbed
+            - control_action_absorbed
             - balance_updated
-            - active_opportunity_set
-            - favorites_updated
-            - strategy_updated
-        source: { type: string, nullable: true }
-        created_at: { type: integer }
+            - projection_published
+        source:
+          type: string
+          nullable: true
+        created_at:
+          type: integer
     BalanceState:
       type: object
       required: [workspace_id, run_id, divergence, research, aggression, reason, updated_at]
       properties:
-        workspace_id: { type: string }
-        run_id: { type: string }
-        divergence: { type: number }
-        research: { type: number }
-        aggression: { type: number }
-        reason: { type: string }
-        updated_at: { type: integer }
-    CreateInterventionRequest:
-      type: object
-      required: [intent]
-      properties:
-        intent: { type: string, minLength: 1 }
-        target_branch_id: { type: string }
-        priority:
+        workspace_id:
           type: string
-          enum: [low, medium, high]
-          default: medium
-    InterventionResponse:
+        run_id:
+          type: string
+        divergence:
+          type: number
+        research:
+          type: number
+        aggression:
+          type: number
+        reason:
+          type: string
+        updated_at:
+          type: integer
+    CreateControlActionRequest:
       type: object
-      required: [intervention]
+      required: [kind]
       properties:
-        intervention:
+        kind:
+          $ref: '#/components/schemas/ControlActionKind'
+        intent:
+          type: string
+        target_branch_id:
+          type: string
+        checkpoint_id:
+          type: string
+        priority:
+          $ref: '#/components/schemas/ControlActionPriority'
+        payload:
           type: object
-          required: [id, workspace_id, status, intent, created_at]
-          properties:
-            id: { type: string }
-            workspace_id: { type: string }
-            intent: { type: string }
-            status: { $ref: '#/components/schemas/InterventionStatus' }
-            absorbed_by_run_id: { type: string, nullable: true }
-            reflected_event_id: { type: string, nullable: true }
-            created_at: { type: string, format: date-time }
-            updated_at: { type: string, format: date-time }
-    InterventionEvent:
+          additionalProperties: true
+    ControlAction:
       type: object
-      required: [id, intervention_id, workspace_id, status, created_at]
+      required: [id, workspace_id, kind, status, created_at]
       properties:
-        id: { type: string }
-        intervention_id: { type: string }
-        workspace_id: { type: string }
-        status: { $ref: '#/components/schemas/InterventionStatus' }
-        created_at: { type: string, format: date-time }
-    InterventionEventsResponse:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ControlActionKind'
+        intent:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ControlActionStatus'
+        priority:
+          $ref: '#/components/schemas/ControlActionPriority'
+        target_branch_id:
+          type: string
+          nullable: true
+        absorbed_by_run_id:
+          type: string
+          nullable: true
+        reflected_event_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ControlActionResponse:
       type: object
-      required: [workspace_id, intervention_id, events, has_more]
+      required: [control_action]
       properties:
-        workspace_id: { type: string }
-        intervention_id: { type: string }
+        control_action:
+          $ref: '#/components/schemas/ControlAction'
+    ControlActionEvent:
+      type: object
+      required: [id, control_action_id, workspace_id, status, created_at]
+      properties:
+        id:
+          type: string
+        control_action_id:
+          type: string
+        workspace_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/ControlActionStatus'
+        summary:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    ControlActionEventsResponse:
+      type: object
+      required: [workspace_id, control_action_id, events, has_more]
+      properties:
+        workspace_id:
+          type: string
+        control_action_id:
+          type: string
         events:
           type: array
           items:
-            $ref: '#/components/schemas/InterventionEvent'
-        next_cursor: { type: string }
-        has_more: { type: boolean }
+            $ref: '#/components/schemas/ControlActionEvent'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+    WorkspaceMemory:
+      type: object
+      required: [id, workspace_id, scope, kind, content, updated_at]
+      properties:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        scope:
+          $ref: '#/components/schemas/MemoryScope'
+        kind:
+          type: string
+        content:
+          type: string
+        pinned:
+          type: boolean
+        source_run_id:
+          type: string
+          nullable: true
+        source_turn_id:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+    WorkspaceMemoriesResponse:
+      type: object
+      required: [workspace_id, items]
+      properties:
+        workspace_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceMemory'
+    SkillBinding:
+      type: object
+      required: [id, workspace_id, skill_key, skill_type, status]
+      properties:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        skill_key:
+          type: string
+        skill_type:
+          type: string
+        status:
+          $ref: '#/components/schemas/SkillBindingStatus'
+        activation_rule:
+          type: string
+          nullable: true
+        instructions_ref:
+          type: string
+          nullable: true
+    SkillBindingsResponse:
+      type: object
+      required: [workspace_id, items]
+      properties:
+        workspace_id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillBinding'
     ProjectionResponse:
       type: object
       required: [projection]
@@ -522,9 +929,13 @@ components:
           type: object
           required: [workspace_id, event_id, generated_at, map, recent_changes]
           properties:
-            workspace_id: { type: string }
-            event_id: { type: string }
-            generated_at: { type: string, format: date-time }
+            workspace_id:
+              type: string
+            event_id:
+              type: string
+            generated_at:
+              type: string
+              format: date-time
             map:
               type: object
               properties:
@@ -534,111 +945,160 @@ components:
                     type: object
                     required: [id, title, type, heat, folded]
                     properties:
-                      id: { type: string }
-                      title: { type: string }
-                      summary: { type: string }
+                      id:
+                        type: string
+                      title:
+                        type: string
+                      summary:
+                        type: string
                       type:
                         $ref: '#/components/schemas/GraphNodeType'
-                      heat: { type: number, description: 'Recent activity level' }
+                      heat:
+                        type: number
                       confidence:
                         type: number
                         nullable: true
-                        description: 'System-assessed confidence (directions only)'
                       maturity:
                         allOf:
                           - $ref: '#/components/schemas/DirectionMaturity'
                         nullable: true
-                        description: 'Lifecycle state (directions only)'
-                      folded: { type: boolean }
+                      folded:
+                        type: boolean
                       evidence_balance:
                         type: object
                         nullable: true
-                        description: 'Evidence counts (directions only)'
                         properties:
-                          supporting: { type: integer }
-                          contradicting: { type: integer }
+                          supporting:
+                            type: integer
+                          contradicting:
+                            type: integer
                       unresolved_count:
                         type: integer
                         nullable: true
-                        description: 'Open unknowns connected to this node'
                       latest_change:
                         type: string
                         nullable: true
-                        description: 'Most recent change summary'
                 edges:
                   type: array
                   items:
                     type: object
                     required: [from, to, kind]
                     properties:
-                      from: { type: string }
-                      to: { type: string }
-                      kind: { type: string }
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      kind:
+                        type: string
                       strength:
                         type: number
                         nullable: true
-                        description: 'Computed from evidence density'
             recent_changes:
               type: array
               items:
                 type: object
                 properties:
-                  type: { type: string }
-                  summary: { type: string }
+                  type:
+                    type: string
+                  summary:
+                    type: string
             run_summary:
               type: object
               properties:
-                run_id: { type: string }
-                status: { $ref: '#/components/schemas/RunStatus' }
-                focus: { type: string }
-            intervention_effects:
+                run_id:
+                  type: string
+                status:
+                  $ref: '#/components/schemas/RunStatus'
+                mode:
+                  $ref: '#/components/schemas/RunMode'
+                focus:
+                  type: string
+            turn_summary:
+              type: object
+              properties:
+                turn_id:
+                  type: string
+                index:
+                  type: integer
+                status:
+                  $ref: '#/components/schemas/TurnStatus'
+                continue_reason:
+                  type: string
+            control_effects:
               type: array
               items:
                 type: object
                 properties:
-                  intervention_id: { type: string }
-                  effect_summary: { type: string }
+                  control_action_id:
+                    type: string
+                  kind:
+                    $ref: '#/components/schemas/ControlActionKind'
+                  effect_summary:
+                    type: string
     TraceSummaryResponse:
       type: object
       required: [workspace_id, items]
       properties:
-        workspace_id: { type: string }
-        run_id: { type: string, nullable: true }
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+          nullable: true
         items:
           type: array
           items:
             type: object
             properties:
-              id: { type: string }
-              timestamp: { type: string, format: date-time }
-              level: { type: string, enum: [info, warn, error] }
+              id:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+              level:
+                type: string
+                enum: [info, warn, error]
               category:
                 type: string
-                enum: [run, tool, mutation, projection, intervention, balance]
-              message: { type: string }
+                enum: [run, turn, tool, approval, mutation, projection, control_action, memory, skill, balance]
+              message:
+                type: string
               related_ids:
                 type: array
-                items: { type: string }
+                items:
+                  type: string
     TraceEventsResponse:
       type: object
       required: [workspace_id, items, has_more]
       properties:
-        workspace_id: { type: string }
-        run_id: { type: string, nullable: true }
+        workspace_id:
+          type: string
+        run_id:
+          type: string
+          nullable: true
         items:
           type: array
           items:
             type: object
             properties:
-              id: { type: string }
-              timestamp: { type: string, format: date-time }
-              level: { type: string, enum: [info, warn, error] }
+              id:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+              level:
+                type: string
+                enum: [info, warn, error]
               category:
                 type: string
-                enum: [run, tool, mutation, projection, intervention, balance]
-              message: { type: string }
+                enum: [run, turn, tool, approval, mutation, projection, control_action, memory, skill, balance]
+              message:
+                type: string
               related_ids:
                 type: array
-                items: { type: string }
-        next_cursor: { type: string }
-        has_more: { type: boolean }
+                items:
+                  type: string
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean

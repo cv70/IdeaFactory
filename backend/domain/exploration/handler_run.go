@@ -264,6 +264,20 @@ func (d *ExplorationDomain) buildRunView(state RuntimeStateSnapshot, run Run) Ru
 		StartedAt:   toRFC3339(run.StartedAt),
 		FinishedAt:  toRFC3339(run.EndedAt),
 	}
+	for _, turn := range state.Turns {
+		if turn.RunID != run.ID {
+			continue
+		}
+		view.TurnCount++
+		view.LatestTurnID = turn.ID
+	}
+	for _, checkpoint := range state.Checkpoints {
+		if checkpoint.RunID != run.ID {
+			continue
+		}
+		view.LatestCheckpointID = checkpoint.ID
+		view.ResumeCursor = checkpoint.ResumeCursor
+	}
 	return view
 }
 

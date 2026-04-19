@@ -69,6 +69,8 @@ func (d *ExplorationDomain) QueryRuntimeState(workspaceID string, query RuntimeS
 			AgentTasks:         append([]AgentTask{}, state.AgentTasks...),
 			Results:            append([]AgentTaskResultSummary{}, state.Results...),
 			Events:             append([]AgentRunEvent{}, state.Events...),
+			Turns:              append([]RunTurn{}, state.Turns...),
+			Checkpoints:        append([]RunCheckpoint{}, state.Checkpoints...),
 			Mutations:          append([]MutationEvent{}, state.Mutations...),
 			Balance:            state.Balance,
 			LatestReplanReason: state.ReplanReason,
@@ -101,6 +103,8 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 		AgentTasks:         []AgentTask{},
 		Results:            []AgentTaskResultSummary{},
 		Events:             []AgentRunEvent{},
+		Turns:              []RunTurn{},
+		Checkpoints:        []RunCheckpoint{},
 		Mutations:          []MutationEvent{},
 		LatestReplanReason: snapshot.LatestReplanReason,
 	}
@@ -128,6 +132,16 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 	for _, event := range snapshot.Events {
 		if _, ok := runIDs[event.RunID]; ok {
 			out.Events = append(out.Events, event)
+		}
+	}
+	for _, turn := range snapshot.Turns {
+		if _, ok := runIDs[turn.RunID]; ok {
+			out.Turns = append(out.Turns, turn)
+		}
+	}
+	for _, checkpoint := range snapshot.Checkpoints {
+		if _, ok := runIDs[checkpoint.RunID]; ok {
+			out.Checkpoints = append(out.Checkpoints, checkpoint)
 		}
 	}
 
@@ -210,6 +224,8 @@ func (d *ExplorationDomain) restoreRuntimeState(workspaceID string) bool {
 		state.AgentTasks = append([]AgentTask{}, snapshot.AgentTasks...)
 		state.Results = append([]AgentTaskResultSummary{}, snapshot.Results...)
 		state.Events = append([]AgentRunEvent{}, snapshot.Events...)
+		state.Turns = append([]RunTurn{}, snapshot.Turns...)
+		state.Checkpoints = append([]RunCheckpoint{}, snapshot.Checkpoints...)
 		state.Balance = snapshot.Balance
 		state.ReplanReason = snapshot.LatestReplanReason
 	})
@@ -366,6 +382,8 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
 		stateCopy.Balance = state.Balance
 		stateCopy.ReplanReason = state.ReplanReason
+		stateCopy.Runs = append([]Run{}, state.Runs...)
+		stateCopy.Turns = append([]RunTurn{}, state.Turns...)
 	})
 
 	cycleResult, runErr := d.runMainAgentCycle(context.Background(), workspaceID, &sessionCopy, &stateCopy)
@@ -388,6 +406,57 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 		if runErr != nil {
 			summary = runErr.Error()
 		}
+		turnIndex := cycleResult.TurnIndex
+		if turnIndex <= 0 {
+			turnIndex = nextRunTurnIndex(latestRunID(state.Runs), state.Turns)
+		}
+		turnID := cycleResult.TurnID
+		if strings.TrimSpace(turnID) == "" {
+			turnID = fmt.Sprintf("turn-%s-%02d", latestRunID(state.Runs), turnIndex)
+		}
+		resumeCursor := cycleResult.ResumeCursor
+		if strings.TrimSpace(resumeCursor) == "" {
+			resumeCursor = turnID
+		}
+		turn := RunTurn{
+			ID:           turnID,
+			WorkspaceID:  workspaceID,
+			RunID:        latestRunID(state.Runs),
+			TurnIndex:    turnIndex,
+			Status:       RunTurnStatusCompleted,
+			StartedAt:    cycleResult.TurnStartedAt,
+			FinishedAt:   now,
+			Summary:      summary,
+			LeadActor:    subAgent,
+			Timeline:     append([]string{}, cycleResult.Timeline...),
+			ResumeCursor: resumeCursor,
+		}
+		if turn.StartedAt == 0 {
+			turn.StartedAt = now
+		}
+		if runErr != nil {
+			turn.Status = RunTurnStatusFailed
+		}
+		state.Turns = append(state.Turns, turn)
+		checkpointID := cycleResult.CheckpointID
+		if strings.TrimSpace(checkpointID) == "" && turn.Status == RunTurnStatusCompleted {
+			checkpointID = fmt.Sprintf("checkpoint-%s-%02d", latestRunID(state.Runs), turnIndex)
+		}
+		if checkpointID != "" {
+			checkpointAt := cycleResult.CheckpointAt
+			if checkpointAt == 0 {
+				checkpointAt = now
+			}
+			state.Checkpoints = append(state.Checkpoints, RunCheckpoint{
+				ID:           checkpointID,
+				WorkspaceID:  workspaceID,
+				RunID:        latestRunID(state.Runs),
+				TurnID:       turnID,
+				ResumeCursor: resumeCursor,
+				Reason:       cycleResult.CheckpointReason,
+				CreatedAt:    checkpointAt,
+			})
+		}
 		state.AgentTasks = append(state.AgentTasks, AgentTask{
 			ID:          taskID,
 			WorkspaceID: workspaceID,
@@ -409,10 +478,17 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 }
 
 type mainAgentCycleResult struct {
-	Summary   string
-	LeadActor string
-	Timeline  []string
-	Events    []AgentRunEvent
+	Summary          string
+	LeadActor        string
+	Timeline         []string
+	Events           []AgentRunEvent
+	TurnID           string
+	TurnIndex        int
+	TurnStartedAt    int64
+	CheckpointID     string
+	CheckpointAt     int64
+	CheckpointReason string
+	ResumeCursor     string
 }
 
 func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID string, session *ExplorationSession, state *RuntimeWorkspaceState) (mainAgentCycleResult, error) {
@@ -433,11 +509,43 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 	events := make([]AgentRunEvent, 0, 8)
 	rootAgent := d.DeepAgent.Name(ctx)
 	runID := latestRunID(state.Runs)
+	turnIndex := nextRunTurnIndex(runID, state.Turns)
+	turnID := fmt.Sprintf("turn-%s-%02d", runID, turnIndex)
+	turnStartedAt := time.Now().UnixMilli()
+	events = append(events, AgentRunEvent{
+		ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		RootAgent:   rootAgent,
+		EventType:   "turn_started",
+		Actor:       string(RuntimeActorMainAgent),
+		Summary:     fmt.Sprintf("turn %d started", turnIndex),
+		Payload: map[string]any{
+			"turn_id":    turnID,
+			"turn_index": turnIndex,
+		},
+		CreatedAt: turnStartedAt,
+	})
 	for event, ok := iter.Next(); ok; event, ok = iter.Next() {
 		if event == nil {
 			continue
 		}
 		if event.Err != nil {
+			errAt := time.Now().UnixMilli()
+			events = append(events, AgentRunEvent{
+				ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+				WorkspaceID: workspaceID,
+				RunID:       runID,
+				RootAgent:   rootAgent,
+				EventType:   "turn_failed",
+				Actor:       string(RuntimeActorMainAgent),
+				Summary:     fmt.Sprintf("turn %d failed", turnIndex),
+				Payload: map[string]any{
+					"turn_id":    turnID,
+					"turn_index": turnIndex,
+				},
+				CreatedAt: errAt,
+			})
 			events = append(events, AgentRunEvent{
 				ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
 				WorkspaceID: workspaceID,
@@ -446,9 +554,18 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 				EventType:   "run_error",
 				Actor:       string(RuntimeActorMainAgent),
 				Summary:     event.Err.Error(),
-				CreatedAt:   time.Now().UnixMilli(),
+				Payload: map[string]any{
+					"turn_id":    turnID,
+					"turn_index": turnIndex,
+				},
+				CreatedAt:   errAt,
 			})
-			return mainAgentCycleResult{Events: events}, event.Err
+			return mainAgentCycleResult{
+				Events:        events,
+				TurnID:        turnID,
+				TurnIndex:     turnIndex,
+				TurnStartedAt: turnStartedAt,
+			}, event.Err
 		}
 		if event.Output == nil {
 			continue
@@ -497,11 +614,55 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 		}
 	}
 	result := mainAgentCycleResult{
-		Summary:   parseMainAgentSummary(lastAssistantMessage),
-		LeadActor: selectLeadAgent(agentActivity, lastAgentActivityAt),
-		Timeline:  appendSummaryStep(timeline, lastAssistantMessage),
-		Events:    events,
+		Summary:       parseMainAgentSummary(lastAssistantMessage),
+		LeadActor:     selectLeadAgent(agentActivity, lastAgentActivityAt),
+		Timeline:      appendSummaryStep(timeline, lastAssistantMessage),
+		Events:        events,
+		TurnID:        turnID,
+		TurnIndex:     turnIndex,
+		TurnStartedAt: turnStartedAt,
 	}
+	completedAt := time.Now().UnixMilli()
+	result.Events = append(result.Events, AgentRunEvent{
+		ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		RootAgent:   rootAgent,
+		EventType:   "turn_completed",
+		Actor:       string(RuntimeActorMainAgent),
+		Summary:     fmt.Sprintf("turn %d completed", turnIndex),
+		Payload: map[string]any{
+			"turn_id":    turnID,
+			"turn_index": turnIndex,
+			"lead_actor": result.LeadActor,
+			"timeline":   result.Timeline,
+			"summary":    result.Summary,
+		},
+		CreatedAt: completedAt,
+	})
+	checkpointID := fmt.Sprintf("checkpoint-%s-%02d", runID, turnIndex)
+	resumeCursor := turnID
+	result.CheckpointID = checkpointID
+	result.CheckpointAt = completedAt
+	result.CheckpointReason = "run_turn_completed"
+	result.ResumeCursor = resumeCursor
+	result.Events = append(result.Events, AgentRunEvent{
+		ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		RootAgent:   rootAgent,
+		EventType:   "run_checkpoint",
+		Actor:       string(RuntimeActorMainAgent),
+		Summary:     fmt.Sprintf("checkpoint created for turn %d", turnIndex),
+		Payload: map[string]any{
+			"checkpoint_id": checkpointID,
+			"turn_id":       turnID,
+			"turn_index":    turnIndex,
+			"resume_cursor": resumeCursor,
+			"reason":        result.CheckpointReason,
+		},
+		CreatedAt: completedAt,
+	})
 	result.Events = append(result.Events, AgentRunEvent{
 		ID:          fmt.Sprintf("event-%s-%d", workspaceID, time.Now().UnixNano()),
 		WorkspaceID: workspaceID,
@@ -513,10 +674,26 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 		Payload: map[string]any{
 			"lead_actor": result.LeadActor,
 			"timeline":   result.Timeline,
+			"turn_id":    turnID,
+			"turn_index": turnIndex,
+			"checkpoint": checkpointID,
 		},
-		CreatedAt: time.Now().UnixMilli(),
+		CreatedAt: completedAt,
 	})
 	return result, nil
+}
+
+func nextRunTurnIndex(runID string, turns []RunTurn) int {
+	next := 1
+	for _, turn := range turns {
+		if turn.RunID != runID {
+			continue
+		}
+		if turn.TurnIndex >= next {
+			next = turn.TurnIndex + 1
+		}
+	}
+	return next
 }
 
 func appendTimelineStep(timeline []string, step string) []string {

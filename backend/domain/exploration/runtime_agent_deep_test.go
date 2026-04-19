@@ -165,20 +165,89 @@ func TestRunMainAgentCycleCapturesHandlerRuntimeEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runMainAgentCycle failed: %v", err)
 	}
-	if len(result.Events) != 4 {
-		t.Fatalf("expected 4 runtime events, got %+v", result.Events)
+	if len(result.Events) != 7 {
+		t.Fatalf("expected 7 runtime events, got %+v", result.Events)
 	}
-	if result.Events[0].EventType != agents.RuntimeEventAgentStart {
-		t.Fatalf("expected agent_start event, got %+v", result.Events[0])
+	if result.Events[0].EventType != "turn_started" {
+		t.Fatalf("expected turn_started event, got %+v", result.Events[0])
 	}
-	if result.Events[1].Target != "GraphAgent" {
-		t.Fatalf("expected delegation target GraphAgent, got %+v", result.Events[1])
+	if result.Events[1].EventType != agents.RuntimeEventAgentStart {
+		t.Fatalf("expected agent_start event, got %+v", result.Events[1])
 	}
-	if result.Events[2].Target != "append_graph_batch" {
-		t.Fatalf("expected tool call event, got %+v", result.Events[2])
+	if result.Events[2].Target != "GraphAgent" {
+		t.Fatalf("expected delegation target GraphAgent, got %+v", result.Events[2])
 	}
-	if result.Events[3].EventType != "run_summary" {
-		t.Fatalf("expected final run_summary event, got %+v", result.Events[3])
+	if result.Events[3].Target != "append_graph_batch" {
+		t.Fatalf("expected tool call event, got %+v", result.Events[3])
+	}
+	if result.Events[4].EventType != "turn_completed" {
+		t.Fatalf("expected turn_completed event, got %+v", result.Events[4])
+	}
+	if result.Events[5].EventType != "run_checkpoint" {
+		t.Fatalf("expected run_checkpoint event, got %+v", result.Events[5])
+	}
+	if result.Events[6].EventType != "run_summary" {
+		t.Fatalf("expected final run_summary event, got %+v", result.Events[6])
+	}
+	if result.TurnID == "" || result.ResumeCursor == "" || result.CheckpointID == "" {
+		t.Fatalf("expected turn/checkpoint metadata, got %+v", result)
+	}
+	if result.ResumeCursor != result.TurnID {
+		t.Fatalf("expected resume cursor to point at turn id, got %+v", result)
+	}
+}
+
+func TestRunSingleAgentPassTracksTurnAndCheckpoint(t *testing.T) {
+	domain := newScriptedExplorationDomain()
+	snapshot, err := domain.CreateWorkspace(CreateWorkspaceReq{Topic: "agent graph", OutputGoal: "runtime"})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	domain.DeepAgent = &scriptedResumableAgent{
+		runFn: func(_ context.Context, _ *adk.AgentInput) *adk.AsyncIterator[*adk.AgentEvent] {
+			iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+			go func() {
+				defer gen.Close()
+				gen.Send(adk.EventFromMessage(schema.AssistantMessage("SUMMARY: checkpoint-aware runtime pass completed", nil), nil, schema.Assistant, ""))
+			}()
+			return iter
+		},
+	}
+
+	runID, launched := domain.triggerRun(context.Background(), snapshot.Exploration.ID, string(RunSourceManual))
+	if !launched || runID == "" {
+		t.Fatalf("expected manual trigger to launch, launched=%v runID=%q", launched, runID)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+
+	state, ok := domain.GetRuntimeState(snapshot.Exploration.ID)
+	if !ok {
+		t.Fatal("expected runtime state")
+	}
+	if len(state.Turns) == 0 {
+		t.Fatal("expected runtime turns")
+	}
+	lastTurn := state.Turns[len(state.Turns)-1]
+	if lastTurn.RunID != runID {
+		t.Fatalf("expected turn run id %s, got %+v", runID, lastTurn)
+	}
+	if lastTurn.Status != RunTurnStatusCompleted {
+		t.Fatalf("expected completed turn, got %+v", lastTurn)
+	}
+	if lastTurn.ResumeCursor == "" {
+		t.Fatalf("expected resume cursor on turn, got %+v", lastTurn)
+	}
+	if len(state.Checkpoints) == 0 {
+		t.Fatal("expected runtime checkpoints")
+	}
+	lastCheckpoint := state.Checkpoints[len(state.Checkpoints)-1]
+	if lastCheckpoint.RunID != runID || lastCheckpoint.TurnID != lastTurn.ID {
+		t.Fatalf("expected checkpoint linked to latest turn, got checkpoint=%+v turn=%+v", lastCheckpoint, lastTurn)
+	}
+	if lastCheckpoint.ResumeCursor != lastTurn.ResumeCursor {
+		t.Fatalf("expected checkpoint cursor to match turn cursor, checkpoint=%+v turn=%+v", lastCheckpoint, lastTurn)
 	}
 }
 

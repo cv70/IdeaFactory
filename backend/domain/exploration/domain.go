@@ -22,6 +22,8 @@ type RuntimeWorkspaceState struct {
 	AgentTasks      []AgentTask
 	Results         []AgentTaskResultSummary
 	Events          []AgentRunEvent
+	Turns           []RunTurn
+	Checkpoints     []RunCheckpoint
 	Balance         BalanceState
 	Mutations       []MutationEvent
 	ReplanReason    string

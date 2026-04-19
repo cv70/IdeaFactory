@@ -168,6 +168,8 @@ type RuntimeStateSnapshot struct {
 	AgentTasks         []AgentTask              `json:"agent_tasks"`
 	Results            []AgentTaskResultSummary `json:"results"`
 	Events             []AgentRunEvent          `json:"events,omitempty"`
+	Turns              []RunTurn                `json:"turns,omitempty"`
+	Checkpoints        []RunCheckpoint          `json:"checkpoints,omitempty"`
 	Mutations          []MutationEvent          `json:"mutations,omitempty"`
 	Balance            BalanceState             `json:"balance"`
 	LatestReplanReason string                   `json:"latest_replan_reason,omitempty"`
@@ -328,12 +330,16 @@ type WorkspaceResponse struct {
 }
 
 type RunView struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	TriggerType string `json:"trigger_type"`
-	Status      string `json:"status"`
-	StartedAt   string `json:"started_at"`
-	FinishedAt  string `json:"finished_at,omitempty"`
+	ID                 string `json:"id"`
+	WorkspaceID        string `json:"workspace_id"`
+	TriggerType        string `json:"trigger_type"`
+	Status             string `json:"status"`
+	StartedAt          string `json:"started_at"`
+	FinishedAt         string `json:"finished_at,omitempty"`
+	TurnCount          int    `json:"turn_count,omitempty"`
+	LatestTurnID       string `json:"latest_turn_id,omitempty"`
+	LatestCheckpointID string `json:"latest_checkpoint_id,omitempty"`
+	ResumeCursor       string `json:"resume_cursor,omitempty"`
 }
 
 type RunResponse struct {
@@ -459,4 +465,36 @@ type ErrorDetail struct {
 	Code    string   `json:"code"`
 	Message string   `json:"message"`
 	Details []string `json:"details,omitempty"`
+}
+
+type RunTurnStatus string
+
+const (
+	RunTurnStatusRunning   RunTurnStatus = "running"
+	RunTurnStatusCompleted RunTurnStatus = "completed"
+	RunTurnStatusFailed    RunTurnStatus = "failed"
+)
+
+type RunTurn struct {
+	ID           string        `json:"id"`
+	WorkspaceID  string        `json:"workspace_id"`
+	RunID        string        `json:"run_id"`
+	TurnIndex    int           `json:"turn_index"`
+	Status       RunTurnStatus `json:"status"`
+	StartedAt    int64         `json:"started_at"`
+	FinishedAt   int64         `json:"finished_at,omitempty"`
+	Summary      string        `json:"summary,omitempty"`
+	LeadActor    string        `json:"lead_actor,omitempty"`
+	Timeline     []string      `json:"timeline,omitempty"`
+	ResumeCursor string        `json:"resume_cursor,omitempty"`
+}
+
+type RunCheckpoint struct {
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	RunID        string `json:"run_id"`
+	TurnID       string `json:"turn_id"`
+	ResumeCursor string `json:"resume_cursor"`
+	Reason       string `json:"reason,omitempty"`
+	CreatedAt    int64  `json:"created_at"`
 }

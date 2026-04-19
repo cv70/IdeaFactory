@@ -253,13 +253,16 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 
 func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.AgentRunRecord) RuntimeStateSnapshot {
 	out := RuntimeStateSnapshot{
-		Runs:       []Run{},
-		AgentTasks: []AgentTask{},
-		Results:    []AgentTaskResultSummary{},
-		Events:     []AgentRunEvent{},
+		Runs:        []Run{},
+		AgentTasks:  []AgentTask{},
+		Results:     []AgentTaskResultSummary{},
+		Events:      []AgentRunEvent{},
+		Turns:       []RunTurn{},
+		Checkpoints: []RunCheckpoint{},
 	}
 	runIndex := map[string]int{}
 	runTimelines := map[string][]string{}
+	runTurns := map[string]map[string]int{}
 	for _, record := range records {
 		var payload map[string]any
 		if strings.TrimSpace(record.Payload) != "" {
@@ -296,6 +299,39 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 			if source, _ := payload["source"].(string); source != "" {
 				run.Source = source
 			}
+		case "turn_started":
+			turnID, _ := payload["turn_id"].(string)
+			turnIndex := intValue(payload["turn_index"])
+			if turnID == "" {
+				turnID = fmt.Sprintf("turn-%s-%02d", record.RunID, turnIndex)
+			}
+			runTurns[record.RunID] = ensureRunTurnIndex(runTurns[record.RunID])
+			runTurns[record.RunID][turnID] = len(out.Turns)
+			out.Turns = append(out.Turns, RunTurn{
+				ID:          turnID,
+				WorkspaceID: workspaceID,
+				RunID:       record.RunID,
+				TurnIndex:   turnIndex,
+				Status:      RunTurnStatusRunning,
+				StartedAt:   record.CreatedAt.UnixMilli(),
+			})
+		case "turn_completed":
+			turnID, _ := payload["turn_id"].(string)
+			turnIndex := intValue(payload["turn_index"])
+			runTurns[record.RunID] = ensureRunTurnIndex(runTurns[record.RunID])
+			idx := lookupOrCreateTurnRecord(&out, workspaceID, record.RunID, runTurns[record.RunID], turnID, turnIndex, record.CreatedAt.UnixMilli())
+			out.Turns[idx].Status = RunTurnStatusCompleted
+			out.Turns[idx].FinishedAt = record.CreatedAt.UnixMilli()
+			out.Turns[idx].LeadActor, _ = payload["lead_actor"].(string)
+			out.Turns[idx].Summary, _ = payload["summary"].(string)
+			out.Turns[idx].Timeline = stringSliceValue(payload["timeline"])
+		case "turn_failed":
+			turnID, _ := payload["turn_id"].(string)
+			turnIndex := intValue(payload["turn_index"])
+			runTurns[record.RunID] = ensureRunTurnIndex(runTurns[record.RunID])
+			idx := lookupOrCreateTurnRecord(&out, workspaceID, record.RunID, runTurns[record.RunID], turnID, turnIndex, record.CreatedAt.UnixMilli())
+			out.Turns[idx].Status = RunTurnStatusFailed
+			out.Turns[idx].FinishedAt = record.CreatedAt.UnixMilli()
 		case "agent_delegate":
 			if record.Target != "" {
 				runTimelines[record.RunID] = appendTimelineValue(runTimelines[record.RunID], record.Target)
@@ -303,6 +339,26 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 		case "tool_call":
 			if record.Actor != "" {
 				runTimelines[record.RunID] = appendTimelineValue(runTimelines[record.RunID], record.Actor)
+			}
+		case "run_checkpoint":
+			checkpointID, _ := payload["checkpoint_id"].(string)
+			if checkpointID == "" {
+				checkpointID = "checkpoint-" + strconv.FormatUint(uint64(record.ID), 10)
+			}
+			turnID, _ := payload["turn_id"].(string)
+			resumeCursor, _ := payload["resume_cursor"].(string)
+			reason, _ := payload["reason"].(string)
+			out.Checkpoints = append(out.Checkpoints, RunCheckpoint{
+				ID:           checkpointID,
+				WorkspaceID:  workspaceID,
+				RunID:        record.RunID,
+				TurnID:       turnID,
+				ResumeCursor: resumeCursor,
+				Reason:       reason,
+				CreatedAt:    record.CreatedAt.UnixMilli(),
+			})
+			if idx := findTurnIndexByID(out.Turns, turnID); idx >= 0 && resumeCursor != "" {
+				out.Turns[idx].ResumeCursor = resumeCursor
 			}
 		case "run_summary":
 			run.Status = RunStatusCompleted
@@ -313,6 +369,17 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 				timeline = append(timeline, leadActor)
 			}
 			timeline = appendTimelineValue(timeline, "SUMMARY")
+			if turnID, _ := payload["turn_id"].(string); turnID != "" {
+				if idx := findTurnIndexByID(out.Turns, turnID); idx >= 0 {
+					out.Turns[idx].LeadActor = firstNonEmpty(out.Turns[idx].LeadActor, leadActor)
+					if out.Turns[idx].Summary == "" {
+						out.Turns[idx].Summary = record.Summary
+					}
+					if len(out.Turns[idx].Timeline) == 0 {
+						out.Turns[idx].Timeline = append([]string{}, timeline...)
+					}
+				}
+			}
 			taskID := "summary-" + strconv.FormatUint(uint64(record.ID), 10)
 			subAgent := firstNonEmpty(leadActor, record.Actor)
 			if subAgent == "" {
@@ -337,6 +404,11 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 		case "run_error":
 			run.Status = RunStatusFailed
 			run.EndedAt = record.CreatedAt.UnixMilli()
+			if turnID, _ := payload["turn_id"].(string); turnID != "" {
+				if idx := findTurnIndexByID(out.Turns, turnID); idx >= 0 {
+					out.Turns[idx].Summary = record.Summary
+				}
+			}
 			taskID := "error-" + strconv.FormatUint(uint64(record.ID), 10)
 			out.AgentTasks = append(out.AgentTasks, AgentTask{
 				ID:          taskID,
@@ -368,6 +440,85 @@ func appendTimelineValue(values []string, next string) []string {
 		return values
 	}
 	return append(values, next)
+}
+
+func ensureRunTurnIndex(index map[string]int) map[string]int {
+	if index != nil {
+		return index
+	}
+	return map[string]int{}
+}
+
+func lookupOrCreateTurnRecord(snapshot *RuntimeStateSnapshot, workspaceID string, runID string, runIndex map[string]int, turnID string, turnIndex int, startedAt int64) int {
+	if turnID != "" {
+		if idx, ok := runIndex[turnID]; ok {
+			return idx
+		}
+		if idx := findTurnIndexByID(snapshot.Turns, turnID); idx >= 0 {
+			runIndex[turnID] = idx
+			return idx
+		}
+	}
+	if turnID == "" {
+		turnID = fmt.Sprintf("turn-%s-%02d", runID, turnIndex)
+	}
+	snapshot.Turns = append(snapshot.Turns, RunTurn{
+		ID:          turnID,
+		WorkspaceID: workspaceID,
+		RunID:       runID,
+		TurnIndex:   turnIndex,
+		Status:      RunTurnStatusRunning,
+		StartedAt:   startedAt,
+	})
+	idx := len(snapshot.Turns) - 1
+	runIndex[turnID] = idx
+	return idx
+}
+
+func findTurnIndexByID(turns []RunTurn, turnID string) int {
+	if strings.TrimSpace(turnID) == "" {
+		return -1
+	}
+	for i := range turns {
+		if turns[i].ID == turnID {
+			return i
+		}
+	}
+	return -1
+}
+
+func intValue(value any) int {
+	switch v := value.(type) {
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func stringSliceValue(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string{}, v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if raw, ok := item.(string); ok && strings.TrimSpace(raw) != "" {
+				out = append(out, raw)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (d *ExplorationDomain) persistAgentRunEvents(events []AgentRunEvent) {
