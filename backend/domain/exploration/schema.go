@@ -99,17 +99,31 @@ type RunStatus string
 const (
 	RunStatusPending   RunStatus = "pending"
 	RunStatusRunning   RunStatus = "running"
+	RunStatusWaiting   RunStatus = "waiting"
 	RunStatusCompleted RunStatus = "completed"
 	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
+)
+
+type RunMode string
+
+const (
+	RunModeExplore  RunMode = "explore"
+	RunModeReview   RunMode = "review"
+	RunModeArtifact RunMode = "artifact"
+	RunModeResume   RunMode = "resume"
 )
 
 type Run struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Source      string    `json:"source"`
-	Status      RunStatus `json:"status"`
-	StartedAt   int64     `json:"started_at"`
-	EndedAt     int64     `json:"ended_at,omitempty"`
+	ID                 string    `json:"id"`
+	WorkspaceID        string    `json:"workspace_id"`
+	Source             string    `json:"source"`
+	Mode               RunMode   `json:"mode,omitempty"`
+	Status             RunStatus `json:"status"`
+	WaitingReason      string    `json:"waiting_reason,omitempty"`
+	LatestCheckpointID string    `json:"latest_checkpoint_id,omitempty"`
+	StartedAt          int64     `json:"started_at"`
+	EndedAt            int64     `json:"ended_at,omitempty"`
 }
 
 type RuntimeTaskStatus string
@@ -171,6 +185,9 @@ type RuntimeStateSnapshot struct {
 	Turns              []RunTurn                `json:"turns,omitempty"`
 	Checkpoints        []RunCheckpoint          `json:"checkpoints,omitempty"`
 	Mutations          []MutationEvent          `json:"mutations,omitempty"`
+	ControlActions     []ControlActionView      `json:"control_actions,omitempty"`
+	LoadedSkills       []string                 `json:"loaded_skills,omitempty"`
+	ActiveMemories     []string                 `json:"active_memories,omitempty"`
 	Balance            BalanceState             `json:"balance"`
 	LatestReplanReason string                   `json:"latest_replan_reason,omitempty"`
 }
@@ -333,7 +350,9 @@ type RunView struct {
 	ID                 string `json:"id"`
 	WorkspaceID        string `json:"workspace_id"`
 	TriggerType        string `json:"trigger_type"`
+	Mode               string `json:"mode,omitempty"`
 	Status             string `json:"status"`
+	WaitingReason      string `json:"waiting_reason,omitempty"`
 	StartedAt          string `json:"started_at"`
 	FinishedAt         string `json:"finished_at,omitempty"`
 	TurnCount          int    `json:"turn_count,omitempty"`
@@ -354,22 +373,32 @@ type ProjectionMap struct {
 type RunSummaryView struct {
 	RunID  string `json:"run_id,omitempty"`
 	Status string `json:"status,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 	Focus  string `json:"focus,omitempty"`
 }
 
-type InterventionEffectView struct {
-	InterventionID string `json:"intervention_id"`
-	EffectSummary  string `json:"effect_summary"`
+type ControlEffectView struct {
+	ControlActionID string `json:"control_action_id"`
+	Kind            string `json:"kind,omitempty"`
+	EffectSummary   string `json:"effect_summary"`
+}
+
+type TurnSummaryView struct {
+	TurnID         string `json:"turn_id,omitempty"`
+	Index          int    `json:"index,omitempty"`
+	Status         string `json:"status,omitempty"`
+	ContinueReason string `json:"continue_reason,omitempty"`
 }
 
 type ProjectionView struct {
-	WorkspaceID         string                   `json:"workspace_id"`
-	EventID             string                   `json:"event_id"`
-	GeneratedAt         string                   `json:"generated_at"`
-	Map                 ProjectionMap            `json:"map"`
-	RecentChanges       []ProjectionChange       `json:"recent_changes,omitempty"`
-	RunSummary          RunSummaryView           `json:"run_summary,omitempty"`
-	InterventionEffects []InterventionEffectView `json:"intervention_effects,omitempty"`
+	WorkspaceID    string              `json:"workspace_id"`
+	EventID        string              `json:"event_id"`
+	GeneratedAt    string              `json:"generated_at"`
+	Map            ProjectionMap       `json:"map"`
+	RecentChanges  []ProjectionChange  `json:"recent_changes,omitempty"`
+	RunSummary     RunSummaryView      `json:"run_summary,omitempty"`
+	TurnSummary    TurnSummaryView     `json:"turn_summary,omitempty"`
+	ControlEffects []ControlEffectView `json:"control_effects,omitempty"`
 }
 
 type ProjectionChange struct {
@@ -391,6 +420,78 @@ type CreateInterventionRequest struct {
 	Intent         string `json:"intent" binding:"required"`
 	TargetBranchID string `json:"target_branch_id"`
 	Priority       string `json:"priority"`
+}
+
+type ControlActionKind string
+
+const (
+	ControlActionIntervention     ControlActionKind = "intervention"
+	ControlActionReviewRequest    ControlActionKind = "review_request"
+	ControlActionArtifactRequest  ControlActionKind = "artifact_request"
+	ControlActionResumeRequest    ControlActionKind = "resume_request"
+	ControlActionPolicyAdjustment ControlActionKind = "policy_adjustment"
+	ControlActionMemoryPin        ControlActionKind = "memory_pin"
+)
+
+type ControlActionStatus string
+
+const (
+	ControlActionReceived  ControlActionStatus = "received"
+	ControlActionAbsorbed  ControlActionStatus = "absorbed"
+	ControlActionReflected ControlActionStatus = "reflected"
+	ControlActionRejected  ControlActionStatus = "rejected"
+)
+
+type ControlActionPriority string
+
+const (
+	ControlActionPriorityLow    ControlActionPriority = "low"
+	ControlActionPriorityNormal ControlActionPriority = "normal"
+	ControlActionPriorityHigh   ControlActionPriority = "high"
+)
+
+type CreateControlActionRequest struct {
+	Kind           ControlActionKind     `json:"kind" binding:"required"`
+	Intent         string                `json:"intent"`
+	TargetBranchID string                `json:"target_branch_id"`
+	CheckpointID   string                `json:"checkpoint_id"`
+	Priority       ControlActionPriority `json:"priority"`
+	Payload        map[string]any        `json:"payload"`
+}
+
+type ControlActionView struct {
+	ID               string                `json:"id"`
+	WorkspaceID      string                `json:"workspace_id"`
+	Kind             ControlActionKind     `json:"kind"`
+	Intent           string                `json:"intent,omitempty"`
+	Status           ControlActionStatus   `json:"status"`
+	Priority         ControlActionPriority `json:"priority,omitempty"`
+	TargetBranchID   string                `json:"target_branch_id,omitempty"`
+	AbsorbedByRunID  string                `json:"absorbed_by_run_id,omitempty"`
+	ReflectedEventID string                `json:"reflected_event_id,omitempty"`
+	CreatedAt        string                `json:"created_at"`
+	UpdatedAt        string                `json:"updated_at"`
+}
+
+type ControlActionResponse struct {
+	ControlAction ControlActionView `json:"control_action"`
+}
+
+type ControlActionEventView struct {
+	ID              string              `json:"id"`
+	ControlActionID string              `json:"control_action_id"`
+	WorkspaceID     string              `json:"workspace_id"`
+	Status          ControlActionStatus `json:"status"`
+	Summary         string              `json:"summary,omitempty"`
+	CreatedAt       string              `json:"created_at"`
+}
+
+type ControlActionEventsResponse struct {
+	WorkspaceID     string                   `json:"workspace_id"`
+	ControlActionID string                   `json:"control_action_id"`
+	Events          []ControlActionEventView `json:"events"`
+	NextCursor      string                   `json:"next_cursor,omitempty"`
+	HasMore         bool                     `json:"has_more"`
 }
 
 type InterventionLifecycleStatus string
@@ -476,17 +577,21 @@ const (
 )
 
 type RunTurn struct {
-	ID           string        `json:"id"`
-	WorkspaceID  string        `json:"workspace_id"`
-	RunID        string        `json:"run_id"`
-	TurnIndex    int           `json:"turn_index"`
-	Status       RunTurnStatus `json:"status"`
-	StartedAt    int64         `json:"started_at"`
-	FinishedAt   int64         `json:"finished_at,omitempty"`
-	Summary      string        `json:"summary,omitempty"`
-	LeadActor    string        `json:"lead_actor,omitempty"`
-	Timeline     []string      `json:"timeline,omitempty"`
-	ResumeCursor string        `json:"resume_cursor,omitempty"`
+	ID                 string        `json:"id"`
+	WorkspaceID        string        `json:"workspace_id"`
+	RunID              string        `json:"run_id"`
+	TurnIndex          int           `json:"turn_index"`
+	Status             RunTurnStatus `json:"status"`
+	InputContextDigest string        `json:"input_context_digest,omitempty"`
+	ToolCallCount      int           `json:"tool_call_count,omitempty"`
+	GraphMutationCount int           `json:"graph_mutation_count,omitempty"`
+	ContinueReason     string        `json:"continue_reason,omitempty"`
+	StartedAt          int64         `json:"started_at"`
+	FinishedAt         int64         `json:"finished_at,omitempty"`
+	Summary            string        `json:"summary,omitempty"`
+	LeadActor          string        `json:"lead_actor,omitempty"`
+	Timeline           []string      `json:"timeline,omitempty"`
+	ResumeCursor       string        `json:"resume_cursor,omitempty"`
 }
 
 type RunCheckpoint struct {

@@ -175,8 +175,12 @@ func traceCategoryForAgentRunEvent(event AgentRunEvent) string {
 	switch event.EventType {
 	case "agent_start", "run_summary", "run_error":
 		return "run"
+	case "turn_started", "turn_completed", "turn_failed":
+		return "turn"
 	case "agent_delegate", "tool_call":
 		return "tool"
+	case "control_action_received", "control_action_absorbed", "control_action_reflected":
+		return "control_action"
 	default:
 		return "tool"
 	}
@@ -246,10 +250,14 @@ func normalizeRunStatus(status RunStatus) string {
 		return "queued"
 	case RunStatusRunning:
 		return "running"
+	case RunStatusWaiting:
+		return "waiting"
 	case RunStatusFailed:
 		return "failed"
 	case RunStatusCompleted:
 		return "completed"
+	case RunStatusCancelled:
+		return "cancelled"
 	default:
 		return "completed"
 	}
@@ -257,12 +265,14 @@ func normalizeRunStatus(status RunStatus) string {
 
 func (d *ExplorationDomain) buildRunView(state RuntimeStateSnapshot, run Run) RunView {
 	view := RunView{
-		ID:          run.ID,
-		WorkspaceID: run.WorkspaceID,
-		TriggerType: run.Source,
-		Status:      deriveRunStatus(state, run),
-		StartedAt:   toRFC3339(run.StartedAt),
-		FinishedAt:  toRFC3339(run.EndedAt),
+		ID:            run.ID,
+		WorkspaceID:   run.WorkspaceID,
+		TriggerType:   run.Source,
+		Mode:          string(run.Mode),
+		Status:        deriveRunStatus(state, run),
+		WaitingReason: run.WaitingReason,
+		StartedAt:     toRFC3339(run.StartedAt),
+		FinishedAt:    toRFC3339(run.EndedAt),
 	}
 	for _, turn := range state.Turns {
 		if turn.RunID != run.ID {
@@ -292,9 +302,15 @@ func deriveRunStatus(state RuntimeStateSnapshot, run Run) string {
 	if run.Status == RunStatusRunning {
 		return "running"
 	}
+	if run.Status == RunStatusWaiting {
+		return "waiting"
+	}
 
 	if run.Status == RunStatusCompleted {
 		return "completed"
+	}
+	if run.Status == RunStatusCancelled {
+		return "cancelled"
 	}
 	return normalizeRunStatus(run.Status)
 }

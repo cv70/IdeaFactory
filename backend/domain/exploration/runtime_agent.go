@@ -25,6 +25,7 @@ func (d *ExplorationDomain) initializeRuntimeState(session ExplorationSession, s
 			ID:          runID,
 			WorkspaceID: session.ID,
 			Source:      source,
+			Mode:        deriveRunMode(source),
 			Status:      RunStatusRunning,
 			StartedAt:   now.UnixMilli(),
 		}
@@ -72,6 +73,9 @@ func (d *ExplorationDomain) QueryRuntimeState(workspaceID string, query RuntimeS
 			Turns:              append([]RunTurn{}, state.Turns...),
 			Checkpoints:        append([]RunCheckpoint{}, state.Checkpoints...),
 			Mutations:          append([]MutationEvent{}, state.Mutations...),
+			ControlActions:     append([]ControlActionView{}, state.ControlActions...),
+			LoadedSkills:       append([]string{}, state.LoadedSkills...),
+			ActiveMemories:     append([]string{}, state.ActiveMemories...),
 			Balance:            state.Balance,
 			LatestReplanReason: state.ReplanReason,
 		}
@@ -106,6 +110,9 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 		Turns:              []RunTurn{},
 		Checkpoints:        []RunCheckpoint{},
 		Mutations:          []MutationEvent{},
+		ControlActions:     []ControlActionView{},
+		LoadedSkills:       append([]string{}, snapshot.LoadedSkills...),
+		ActiveMemories:     append([]string{}, snapshot.ActiveMemories...),
 		LatestReplanReason: snapshot.LatestReplanReason,
 	}
 
@@ -142,6 +149,15 @@ func filterRuntimeByRunIDs(snapshot RuntimeStateSnapshot, runIDs map[string]stru
 	for _, checkpoint := range snapshot.Checkpoints {
 		if _, ok := runIDs[checkpoint.RunID]; ok {
 			out.Checkpoints = append(out.Checkpoints, checkpoint)
+		}
+	}
+	for _, action := range snapshot.ControlActions {
+		if action.AbsorbedByRunID == "" {
+			out.ControlActions = append(out.ControlActions, action)
+			continue
+		}
+		if _, ok := runIDs[action.AbsorbedByRunID]; ok {
+			out.ControlActions = append(out.ControlActions, action)
 		}
 	}
 
@@ -238,6 +254,7 @@ func (d *ExplorationDomain) startRuntimeRunLocked(session ExplorationSession, so
 		ID:          runID,
 		WorkspaceID: session.ID,
 		Source:      source,
+		Mode:        deriveRunMode(source),
 		Status:      RunStatusRunning,
 		StartedAt:   now.UnixMilli(),
 	}
@@ -344,6 +361,7 @@ func (d *ExplorationDomain) triggerRun(ctx context.Context, workspaceID string, 
 			ID:          runID,
 			WorkspaceID: workspaceID,
 			Source:      source,
+			Mode:        deriveRunMode(source),
 			Status:      RunStatusRunning,
 			StartedAt:   now.UnixMilli(),
 		}
@@ -419,17 +437,21 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 			resumeCursor = turnID
 		}
 		turn := RunTurn{
-			ID:           turnID,
-			WorkspaceID:  workspaceID,
-			RunID:        latestRunID(state.Runs),
-			TurnIndex:    turnIndex,
-			Status:       RunTurnStatusCompleted,
-			StartedAt:    cycleResult.TurnStartedAt,
-			FinishedAt:   now,
-			Summary:      summary,
-			LeadActor:    subAgent,
-			Timeline:     append([]string{}, cycleResult.Timeline...),
-			ResumeCursor: resumeCursor,
+			ID:                 turnID,
+			WorkspaceID:        workspaceID,
+			RunID:              latestRunID(state.Runs),
+			TurnIndex:          turnIndex,
+			Status:             RunTurnStatusCompleted,
+			InputContextDigest: cycleResult.InputContextDigest,
+			ToolCallCount:      cycleResult.ToolCallCount,
+			GraphMutationCount: cycleResult.GraphMutationCount,
+			ContinueReason:     cycleResult.ContinueReason,
+			StartedAt:          cycleResult.TurnStartedAt,
+			FinishedAt:         now,
+			Summary:            summary,
+			LeadActor:          subAgent,
+			Timeline:           append([]string{}, cycleResult.Timeline...),
+			ResumeCursor:       resumeCursor,
 		}
 		if turn.StartedAt == 0 {
 			turn.StartedAt = now
@@ -456,6 +478,9 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 				Reason:       cycleResult.CheckpointReason,
 				CreatedAt:    checkpointAt,
 			})
+			if len(state.Runs) > 0 {
+				state.Runs[len(state.Runs)-1].LatestCheckpointID = checkpointID
+			}
 		}
 		state.AgentTasks = append(state.AgentTasks, AgentTask{
 			ID:          taskID,
@@ -478,17 +503,21 @@ func (d *ExplorationDomain) runSingleAgentPass(workspaceID string) {
 }
 
 type mainAgentCycleResult struct {
-	Summary          string
-	LeadActor        string
-	Timeline         []string
-	Events           []AgentRunEvent
-	TurnID           string
-	TurnIndex        int
-	TurnStartedAt    int64
-	CheckpointID     string
-	CheckpointAt     int64
-	CheckpointReason string
-	ResumeCursor     string
+	Summary            string
+	LeadActor          string
+	Timeline           []string
+	Events             []AgentRunEvent
+	TurnID             string
+	TurnIndex          int
+	TurnStartedAt      int64
+	InputContextDigest string
+	ToolCallCount      int
+	GraphMutationCount int
+	ContinueReason     string
+	CheckpointID       string
+	CheckpointAt       int64
+	CheckpointReason   string
+	ResumeCursor       string
 }
 
 func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID string, session *ExplorationSession, state *RuntimeWorkspaceState) (mainAgentCycleResult, error) {
@@ -558,7 +587,7 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 					"turn_id":    turnID,
 					"turn_index": turnIndex,
 				},
-				CreatedAt:   errAt,
+				CreatedAt: errAt,
 			})
 			return mainAgentCycleResult{
 				Events:        events,
@@ -614,13 +643,17 @@ func (d *ExplorationDomain) runMainAgentCycle(ctx context.Context, workspaceID s
 		}
 	}
 	result := mainAgentCycleResult{
-		Summary:       parseMainAgentSummary(lastAssistantMessage),
-		LeadActor:     selectLeadAgent(agentActivity, lastAgentActivityAt),
-		Timeline:      appendSummaryStep(timeline, lastAssistantMessage),
-		Events:        events,
-		TurnID:        turnID,
-		TurnIndex:     turnIndex,
-		TurnStartedAt: turnStartedAt,
+		Summary:            parseMainAgentSummary(lastAssistantMessage),
+		LeadActor:          selectLeadAgent(agentActivity, lastAgentActivityAt),
+		Timeline:           appendSummaryStep(timeline, lastAssistantMessage),
+		Events:             events,
+		TurnID:             turnID,
+		TurnIndex:          turnIndex,
+		TurnStartedAt:      turnStartedAt,
+		InputContextDigest: buildTurnContextDigest(session, state),
+		ToolCallCount:      countToolEvents(events),
+		GraphMutationCount: countRunGraphMutations(session.ID, runID, turnID),
+		ContinueReason:     deriveContinueReason(lastAssistantMessage),
 	}
 	completedAt := time.Now().UnixMilli()
 	result.Events = append(result.Events, AgentRunEvent{
@@ -770,6 +803,54 @@ func latestRunID(runs []Run) string {
 		return ""
 	}
 	return runs[len(runs)-1].ID
+}
+
+func deriveRunMode(source string) RunMode {
+	switch strings.TrimSpace(source) {
+	case "resume":
+		return RunModeResume
+	case "control_action":
+		return RunModeReview
+	default:
+		return RunModeExplore
+	}
+}
+
+func buildTurnContextDigest(session *ExplorationSession, state *RuntimeWorkspaceState) string {
+	return fmt.Sprintf(
+		"topic=%s nodes=%d edges=%d balance=%.2f/%.2f/%.2f replan=%s",
+		session.Topic,
+		len(session.Nodes),
+		len(session.Edges),
+		state.Balance.Divergence,
+		state.Balance.Research,
+		state.Balance.Aggression,
+		firstNonEmpty(state.ReplanReason, "none"),
+	)
+}
+
+func countToolEvents(events []AgentRunEvent) int {
+	count := 0
+	for _, event := range events {
+		if event.EventType == "tool_call" {
+			count++
+		}
+	}
+	return count
+}
+
+func deriveContinueReason(lastAssistantMessage string) string {
+	if strings.TrimSpace(lastAssistantMessage) == "" {
+		return "no_change"
+	}
+	if strings.Contains(strings.ToLower(lastAssistantMessage), "no graph changes") {
+		return "stable"
+	}
+	return "graph_extended"
+}
+
+func countRunGraphMutations(_ string, _ string, _ string) int {
+	return 0
 }
 
 // adjustBalanceForIntent adjusts BalanceState fields based on intent keyword scanning.

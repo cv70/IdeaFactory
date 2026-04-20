@@ -25,10 +25,14 @@ func buildTraceSummary(workspaceID string, runID string, state RuntimeStateSnaps
 		switch event.EventType {
 		case "agent_start", "run_summary", "run_error":
 			category = "run"
+		case "turn_started", "turn_completed", "turn_failed":
+			category = "turn"
 		case "agent_delegate":
 			category = "tool"
 		case "tool_call":
 			category = "tool"
+		case "control_action_received", "control_action_absorbed", "control_action_reflected":
+			category = "control_action"
 		}
 		resp.Items = append(resp.Items, TraceSummaryItem{
 			ID:        "event-" + event.ID,
@@ -66,6 +70,18 @@ func buildTraceSummary(workspaceID string, runID string, state RuntimeStateSnaps
 			Message:   mutation.Kind,
 			RelatedIDs: []string{
 				mutation.WorkspaceID,
+			},
+		})
+	}
+	for _, action := range state.ControlActions {
+		resp.Items = append(resp.Items, TraceSummaryItem{
+			ID:        "control-action-" + action.ID,
+			Timestamp: action.UpdatedAt,
+			Level:     "info",
+			Category:  "control_action",
+			Message:   fmt.Sprintf("%s %s", action.Kind, action.Status),
+			RelatedIDs: []string{
+				action.ID,
 			},
 		})
 	}
@@ -135,7 +151,7 @@ func applyTracePagination(items []TraceSummaryItem, cursor string, limit int) ([
 
 func isValidTraceCategory(category string) bool {
 	switch category {
-	case "run", "tool", "mutation", "projection", "intervention", "balance":
+	case "run", "turn", "tool", "approval", "mutation", "projection", "control_action", "intervention", "memory", "skill", "balance":
 		return true
 	default:
 		return false

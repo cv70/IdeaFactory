@@ -26,6 +26,9 @@ type RuntimeWorkspaceState struct {
 	Checkpoints     []RunCheckpoint
 	Balance         BalanceState
 	Mutations       []MutationEvent
+	ControlActions  []ControlActionView
+	LoadedSkills    []string
+	ActiveMemories  []string
 	ReplanReason    string
 	Interventions   map[string]InterventionView // keyed by intervention ID
 	AgentRunning    bool                        // true while runAgentCycle goroutine is active

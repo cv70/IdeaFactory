@@ -43,8 +43,28 @@ func (d *ExplorationDomain) buildProjectionResponse(snapshot *WorkspaceSnapshot)
 			view.RunSummary = RunSummaryView{
 				RunID:  lastRun.ID,
 				Status: normalizeRunStatus(lastRun.Status),
+				Mode:   string(lastRun.Mode),
 				Focus:  snapshot.Exploration.ActiveOpportunityID,
 			}
+		}
+		if len(state.Turns) > 0 {
+			lastTurn := state.Turns[len(state.Turns)-1]
+			view.TurnSummary = TurnSummaryView{
+				TurnID:         lastTurn.ID,
+				Index:          lastTurn.TurnIndex,
+				Status:         string(lastTurn.Status),
+				ContinueReason: lastTurn.ContinueReason,
+			}
+		}
+		for _, action := range state.ControlActions {
+			if action.Status != ControlActionReflected {
+				continue
+			}
+			view.ControlEffects = append(view.ControlEffects, ControlEffectView{
+				ControlActionID: action.ID,
+				Kind:            string(action.Kind),
+				EffectSummary:   firstNonEmpty(action.Intent, string(action.Kind)),
+			})
 		}
 	}
 	return ProjectionResponse{Projection: view}

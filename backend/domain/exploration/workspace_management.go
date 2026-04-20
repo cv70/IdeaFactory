@@ -64,6 +64,7 @@ func (d *ExplorationDomain) ArchiveWorkspace(workspaceID string) bool {
 
 	d.withWorkspaceState(workspaceID, func(state *RuntimeWorkspaceState) {
 		state.Interventions = map[string]InterventionView{}
+		state.ControlActions = nil
 	})
 
 	return true

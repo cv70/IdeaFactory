@@ -1,190 +1,212 @@
-# Idea Factory 吸收 Claude Code / Codex / Hermes 模式的实施路线图
+# Idea Factory 实施路线图
 
-> 版本：v0.2-draft
+> 版本：v0.3-target
 > 日期：2026-04-19
-> 状态：与新版 specs 对齐的分阶段实施建议
+> 状态：三层架构验证导向的实施计划
 
-## 1. 总体原则
+## 🎯 总体策略
 
-目标不是“集成三个 agent 产品”，而是把三种成熟模式拆成可落地工程阶段：
+Idea Factory 的实施遵循三层架构验证方法：
+1. **阶段一**：控制面与执行协议层定型 - 建立基本可治理、可追溯的探索系统
+2. **阶段二**：长期能力层验证 - 验证系统能够学习和积累能力
+3. **阶段三**：平台化开放 - 开放扩展能力供专家系统和多入口协作
 
-- 先补控制面
-- 再补执行协议
-- 再补长期记忆与技能
-- 最后才引入 specialist、多入口与自动化
+每个阶段都有明确的验证标志，确保在进入下一阶段前当前层次的架构原则得到充分验证。
 
-原因很简单：
-
-- 没有控制面，自治系统不可驾驭
-- 没有执行协议，自治系统不可治理
-- 没有长期能力，自治系统不可积累
-- 过早上多入口和多 agent，只会把问题放大
-
-## 2. 当前新版 specs 已经明确的目标态
-
-目前 `docs/superpowers/specs/` 已经把下面这些对象正式收进目标态：
-
-- `control_action`
-- `run`
-- `turn`
-- `checkpoint`
-- `workspace_memory`
-- `skill_binding`
-- `tool risk policy`
-
-因此本路线图的意义不再是“是否要引入这些概念”，而是“先后怎么实现这些概念”。
-
-## 3. Phase 1：补齐控制面与可观测运行状态
+## 📅 阶段一：控制面与执行协议层定型（当前阶段）
 
 ### 目标
+建立基本的用户治理入口和安全可追溯的执行协议，使系统能够在用户控制下进行基本的探索操作。
 
-优先吸收 `Claude Code` 的控制面思想，让 `Idea Factory` 从“后台 agent 在跑”升级为“用户能看见并驾驭系统在跑”。
+### 关键组件
+- **控制面 (L1)**
+  - 基础控制台：探索/暂停/继续/重定向控制动作
+  - 运行状态可视化：当前run/turn状态、等待原因
+  - 基础控制动作反馈机制：已接收/已吸收/已反映/后续影响
+  
+- **执行协议层 (L2)**
+  - Run/Turn/Checkpoint 协议实现
+  - 基础工具风险策略：简单的允许/拒绝机制
+  - 事件溯源系统：基本的工具调用和控制动作追踪
+  - 检查点与恢复机制：从最近一致状态恢复
 
-### 交付重点
+### 验证标志
+- [ ] 用户可以通过控制台启动、暂停、继续探索会话
+- [ ] 所有用户控制动作都能得到明确的四类反馈（已接收/已吸收/已反映/后续影响）
+- [ ] 系统能够从检查点正确恢复运行状态
+- [ ] 所有工具调用和图谱修改都有不可变的事件记录
+- [ ] 中断后系统能够从最近检查点恢复并继续之前的探索
 
-- 增加 `control_action` 领域对象
-- 把 `pause / resume / redirect / review / artifact request / policy adjustment` 做成结构化 API
-- 为 UI 暴露当前 run / turn / waiting reason / checkpoint 状态
-- 明确 control action 的吸收状态：`received / absorbed / reflected`
-- 增加基础运行事件流与控制动作事件流
+### 交付物
+- 基础工作空间API
+- 控制平面实现（结构化控制动作处理）
+- 运行协调器（run/turn/checkpoint生命周期管理）
+- 基础工具表策略（简单允许/拒绝）
+- 图谱集成管道（基本追加操作）
+- 投影构建器（基本只读视图）
+- 前端控制台原型（探索控制基本功能）
 
-### 建议落点
-
-- `IdeaFactory/backend/domain/exploration/`
-- `IdeaFactory/frontend/src/types/`
-- `IdeaFactory/frontend/src/lib/`
-- `IdeaFactory/docs/superpowers/specs/idea-factory-product-design.md`
-- `IdeaFactory/docs/superpowers/specs/idea-factory-openapi.yaml`
-
-### 完成标志
-
-系统至少能回答：
-
-- 现在是否在自动推进
-- 当前 run 处于哪一轮、在等什么
-- 用户最近一次治理动作有没有真正影响到地图
-- 是否可以从稳定点继续推进
-
-## 4. Phase 2：把 Run 做成 turn-level 执行协议
-
-### 目标
-
-吸收 `Codex` 的 task / turn / approval 思想，让 `Idea Factory` 的自治推进变成可恢复、可追踪、可解释的协议。
-
-### 交付重点
-
-- 显式增加 `RunTurn`
-- 增加 `run_checkpoint`
-- 给每次 graph mutation 绑定 `run_id + turn_id`
-- 定义 tool risk levels 与 approval rules
-- 定义标准事件：`turn_started`、`tool_called`、`graph_mutation_committed`、`projection_published`、`run_completed`
-
-### 建议落点
-
-- `IdeaFactory/backend/domain/exploration/`
-- `IdeaFactory/backend/agents/exploration_runtime_handler.go`
-- `IdeaFactory/backend/agentools/append_graph_batch.go`
-- `IdeaFactory/docs/superpowers/specs/idea-factory-technical-design.md`
-- `IdeaFactory/docs/superpowers/specs/idea-factory-system-architecture.md`
-
-### 完成标志
-
-系统至少能回答：
-
-- 一个 run 被拆成了几次 turn
-- 每次 turn 做了什么工具调用与图谱写入
-- 哪个 checkpoint 对应哪次重要方向变化
-- 某次审批或失败是在哪一轮出现的
-
-## 5. Phase 3：为 Workspace 增加长期记忆与 Skill Binding
+## 📅 阶段二：长期能力层验证
 
 ### 目标
+验证系统能够跨运行积累知识和能力，使探索会话不会表现得像每次都是第一次运行。
 
-吸收 `Hermes` 的 session / memory / skills 思想，让 `workspace` 真正具备长期学习能力。
+### 关键组件
+- **长期能力层 (L3)**
+  - 工作空间记忆服务：历史运行结论的持久化存储
+  - 用户偏好记忆：学习和存储用户在特定工作空间中的行为模式
+  - 技能绑定服务：发现、装载和追踪探索技能
+  - 跨运行上下文维护：在工作空间间传递学习结果
 
-### 交付重点
+### 验证标志
+- [ ] 系统能够在多次运行间保持和复用工作空间记忆
+- [ ] 用户在工作空间中的反馈和偏好能够影响后续运行行为
+- [ ] 常用的探索模式能够自动沉淀为技能并在相关任务中被装载
+- [ ] 系统表现出“越跑越懂当前主题”的能力，而不是每次都像第一次运行
+- [ ] 长期记忆能够明确归因到特定的运行或用户动作
 
-- 增加 `workspace_memory`
-- 增加 `user_preference_memory`
-- 增加 `workspace_skill_binding`
-- 支持研究模板、artifact 模板、review 模板按需装载
-- 支持 turn 结束后的异步 context prefetch
+### 交付物
+- 记忆服务实现（工作空间记忆和用户偏好记忆）
+- 技能绑定服务（技能发现、绑定和版本控制）
+- 跨运行上下文机制（异步预取和上下文压缩）
+- 记忆和技能的持久化存储
+- 前端增强（记忆和技能可视化）
 
-### 建议的记忆分层
-
-- `run working memory`
-- `workspace memory`
-- `user preference memory`
-
-### 完成标志
-
-系统不只是“能继续跑”，而是“带着过去学到的东西继续跑”。
-
-## 6. Phase 4：谨慎引入 specialist / review worker / artifact worker
-
-### 目标
-
-只在明确收益场景下吸收 `Hermes` 与 `Claude Code` 展示出的 multi-agent 协作能力。
-
-### 建议先支持三类 specialist
-
-- `ResearchAgent`
-- `ReviewAgent`
-- `ArtifactAgent`
-
-### 关键约束
-
-- 主判断仍归 `MainAgent`
-- specialist 默认没有 graph 直写特权
-- specialist 输出必须通过受控 tool 或回收给主 agent
-- 是否引入 specialist 的判断标准是“显著缩短时间或提高质量”，不是“架构看起来更先进”
-
-### 完成标志
-
-并行研究、专项审查、artifact 物化可以提升效率，但 workspace 真相层仍然只有一套。
-
-## 7. Phase 5：开放多入口、调度与自动化
+## 📅 阶段三：平台化开放
 
 ### 目标
+将 Idea Factory 开放为可扩展的平台，支持专家系统、多入口协作和第三方集成。
 
-最后再吸收 `Claude Code` 的 remote / trigger / plugin 与 `Hermes` 的 gateway / long-running shell 思路。
+### 关键组件
+- **平台扩展能力**
+  - API/SDK 开放：标准化的集成接口
+  - 专家系统支持：受控的专业代理协作
+  - 多入口协作：不同用户和系统的协同工作
+  - 适配器机制：第三方工具和服务的集成
 
-### 可能能力
+### 验证标志
+- [ ] 外部系统能够通过标准API与 Idea Factory 集成
+- [ ] 专家代理能够在受控边界内协作完成复杂任务
+- [ ] 多用户能够在同一个工作空间上协同工作
+- [ ] 第三方工具和服务能够通过适配器机制集成
+- [ ] 系统在开放扩展后仍然保持三层架构的完整性
 
-- 定时探索 run
-- webhook 或外部信号触发 control action
-- API / workbench / automation bridge 多入口
-- workspace 级 skill pack 与 connector 扩展
-- 周报式方向变化摘要
+### 交付物
+- 完整的RESTful API和WebSocket接口
+- SDK（支持多种语言的客户端库）
+- 专家系统框架（受控的代理协作环境）
+- 多入口协作机制（冲突解决和状态同步）
+- 适配器开发文档和示例
 
-### 注意事项
+## 🔄 阶段之间的依赖关系
 
-这一步必须最后做，因为：
+```mermaid
+graph TD
+    A[阶段一: 控制面+执行协议层] --> B[阶段二: 长期能力层]
+    B --> C[阶段三: 平台化开放]
+    
+    %% 阶段一依赖的能力
+    A1[基本控制动作] --> A
+    A2[运行生命周期管理] --> A
+    A3[工具风险策略] --> A
+    A4[事件溯源追踪] --> A
+    A5[检查点恢复机制] --> A
+    
+    %% 阶段二依赖的能力
+    B1[持久记忆存储] --> B
+    B2[用户偏好学习] --> B
+    B3[技能发现机制] --> B
+    B4[跨运行上下文] --> B
+    
+    %% 阶段三依赖的能力
+    C1[标准化API接口] --> C
+    C2[专家系统框架] --> C
+    C3[多入口协作机制] --> C
+    C4[适配器机制] --> C
+    
+    %% 质量门
+    style A1 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style A2 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style A3 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style A4 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style A5 fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    
+    style B1 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style B2 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style B3 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style B4 fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    
+    style C1 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style C2 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style C3 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style C4 fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+```
 
-- 没有稳定协议，多入口只会放大混乱
-- 没有稳定 memory，自动化只会堆出脏状态
-- 没有稳定 control plane，远程触发会让系统难以治理
+## 📈 成功指标
 
-## 8. 当前不建议做的事
+### 阶段一成功指标
+- 控制动作响应时间 < 500ms
+- 事件追溯完整性 100%（所有高影响动作都有记录）
+- 检查点恢复成功率 > 99%
+- 用户对控制反馈的满意度（目标：4.0/5.0）
 
-为防止范围失控，建议暂缓：
+### 阶段二成功指标
+- 长期记忆保留率 > 95%（跨系统重启）
+- 用户偏好预测准确率 > 80%
+- 技能复用率提升 > 50%（相同类型任务）
+- 跨运行上下文传递延迟 < 2s
 
-- 把 `Idea Factory` 做成通用聊天平台
-- 过早支持过多外部消息渠道
-- 在 graph truth layer 之外再造一套并行真相系统
-- 在没有 turn/checkpoint/policy 的前提下大量引入 subagents
-- 把所有探索套路硬编码进主 prompt，而不给 skill 与 policy 留演进空间
+### 阶段三成功指标
+- API响应时间 < 200ms（95%请求）
+- 第三方集成数量 > 5种不同服务
+- 专家系统协作成功率 > 90%
+- 多用户协作冲突解决时间 < 5s
 
-## 9. 成功判据
+## 🛡️ 风险缓解措施
 
-如果这套路线上线后有效，应该能看到：
+### 架构完整性风险
+- **风险**：在实施过程中各层职责边界变得模糊
+- **缓解**：定期架构评审，使用领域驱动设计原则保持层间清晰接口
+- **监控**：每个组件只依赖其直接下层的明确定义接口
 
-- 用户能更轻松地介入并改变系统后续几轮行为
-- 同一个 workspace 可以长期推进且仍然可解释
-- 相似 workspace 的重复劳动明显减少
-- 方向地图与 artifact 产出之间的关联更稳定
-- 研究、审查、产出三类工作能在同一 runtime 下被统一治理
+### 性能风险
+- **风险**：三层架构引入额外的延迟
+- **缓解**：异步处理和批量操作优化，关键路径性能预算
+- **监控**：端到端延迟监控，每层预算不超过总延迟的30%
 
-## 10. 一句话总结
+### 可用性风险
+- **风险**：复杂架构导致系统不可用
+- **缓解**：渐进式交付，每个阶段都有可工作的最小系统
+- **监控**：可用性 SLA > 99.9%，故障恢复时间 < 30s
 
-先学 `Claude Code` 做控制台，再学 `Codex` 管执行，再学 `Hermes` 养长期能力；等这三层稳定之后，`Idea Factory` 才适合进入真正的自治探索平台阶段。
+## 📚 参考实践
+
+本路线图结合了以下参考系统的成功经验：
+
+### 从 Claude Code 借鉴
+- 控制面的渐进式暴露：从基本命令开始，逐步添加高级控制功能
+- 明确的反馈机制：每个控制动作都提供明确的确认和效果说明
+- 会话管理的重要性：强调从检查点恢复和会话历史的价值
+
+### 从 Codex 借鉴
+- 执行协议的严格性：从简单的允许/拒绝开始，逐步完善风险策略
+- 事件溯源的完整性：确保所有高影响动作都有不可变记录
+- 检查点机制的可靠性：重点验证从任意一致状态的恢复能力
+
+### 从 Hermes Agent 借鉴
+- 长期能力的价值：强调持久记忆和技能系统对用户体验的影响
+- 用户建模的重要性：验证系统能够真正学习用户偏好而不仅仅是存储
+- 技能系统的实用性：专注于能够实际提升重复任务效率的技能
+
+## ✅ 下一步行动
+
+1. **立即**（本周）：完成阶段一的基本控制面和执行协议层组件
+2. **短期**（2-4周）：实现阶段一验证标志，进行内部测试和反馈
+3. **中期**（1-2月）：进入阶段二，开发长期能力层组件
+4. **长期**（3-6月）：完成阶段二验证，开始阶段三平台化开放工作
+
+每个里程碑都应包括：
+- 架构评审确保层间职责清晰
+- 性能基线建立和监控
+- 用户可用性测试和反馈收集
+- 文档更新和知识传递

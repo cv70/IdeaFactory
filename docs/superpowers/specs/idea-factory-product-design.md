@@ -46,11 +46,11 @@
 - `方向地图`：当前真相层的可视化投影
 - `控制台`：用户治理自治系统的显式入口
 
-这组心智分别吸收了三类参考模式：
+这组心智分别吸收了三类参考模式的具体架构元素：
 
-- `Claude Code` 提醒我们长期自治系统需要强控制面
-- `Codex` 提醒我们高影响动作必须可解释、可追踪
-- `Hermes` 提醒我们长期能力必须跨 run 沉淀而不是每次重来
+- **`Claude Code` → 控制面 (L1)**：显式控制表面、命令系统、模式切换、治理入口
+- **`Codex` → 执行协议层 (L2)**：任务-回合协议、工具风险策略、检查点机制、不可变追踪
+- **`Hermes` → 长期能力层 (L3)**：持久会话记忆、技能系统、用户偏好模型、跨运行上下文
 
 ### 3.2 产品核心承诺
 
@@ -116,29 +116,29 @@
 
 参考 `Claude Code` 的 command surface 思路，`Idea Factory` 需要把高频治理动作产品化成明确操作，而不是只依赖自由文本输入。
 
-建议最小控制动作集合：
+建议最小控制动作集合（直接映射自 Claude Code 的控制范式）：
 
-- `Start Exploration`
-- `Pause Auto Run`
-- `Resume From Checkpoint`
-- `Redirect Focus`
-- `Raise Evidence Standard`
-- `Request Review`
-- `Compare Branches`
-- `Generate Artifact`
-- `Pin Memory`
-- `Adjust Policy`
+- `Start Exploration` ↔ Claude Code's `/agent` / autonomous mode initiation
+- `Pause Auto Run` ↔ Claude Code's plan mode toggle / session interruption
+- `Resume From Checkpoint` ↔ Claude Code's `/resume` command functionality
+- `Redirect Focus` ↔ Claude Code's intervention system for changing agent behavior
+- `Raise Evidence Standard` ↔ Claude Code's `/review` for adjusting confidence thresholds
+- `Request Review` ↔ Claude Code's `/review` command for process examination
+- `Compare Branches` ← Claude Code's session comparison and branching concepts
+- `Generate Artifact` ↔ Claude Code's `/share` / output materialization
+- `Pin Memory` ← Claude Code's `/memory` persistent storage system
+- `Adjust Policy` ← Claude Code's `/config` for runtime behavior modification
 
 这些动作的交互形态可以是按钮、命令框、侧栏面板或快捷入口，但语义必须结构化。
 
 ## 8. Intervention 与控制动作产品契约
 
-用户发出干预后，产品至少必须返回四类反馈：
+用户发出干预后，产品至少必须返回四类反馈（源自 Claude Code 的控制反馈模型）：
 
-- `已接收`：系统是否接受了该动作
-- `已吸收`：系统是否把该动作纳入后续运行上下文
-- `已反映`：地图、状态或产物层出现了哪些变化
-- `后续影响`：接下来系统将如何调整探索或审查重心
+- `已接收`：系统是否接受了该动作（Command acknowledgment）
+- `已吸收`：系统是否把该动作纳入后续运行上下文（State integration confirmation）
+- `已反映`：地图、状态或产物层出现了哪些变化（Visible effect demonstration）
+- `后续影响`：接下来系统将如何调整探索或审查重心（Future behavior prediction）
 
 如果这四类反馈缺失，用户会把系统视为黑盒。
 
@@ -156,32 +156,38 @@
 
 用户需要能要求系统回答：
 
-- 为什么当前地图这样演进
-- 某一方向的证据是否足够
-- 当前结论可能遗漏了哪些反证或风险
+- 为什么当前地图这样演进（Causal explanation）
+- 某一方向的证据是否足够（Evidence adequacy assessment）
+- 当前结论可能遗漏了哪些反证或风险（Contradiction scanning）
+
+这直接映射自 Claude Code 的 `/review` 系统，但应用于方向地图而非代码。
 
 ### 9.2 Resume
 
 用户需要能从稳定 checkpoint 或最新一致状态继续，而不是只能重新发起一个模糊 run。
 
+这直接映射自 Claude Code 的 `/resume` 系统和 Codex 的 checkpoint-recovery 协议。
+
 ### 9.3 Artifact
 
 当方向成熟后，用户需要一键把方向转成产物，而不是离开地图另开一个工作流。
+
+这结合了 Claude Code 的输出分享机制和 Codex 的 artifact 生成协议。
 
 ## 10. 长期连续性产品契约
 
 吸收 `Hermes` 的 session / memory / skills 思想后，产品层需要明确以下长期能力：
 
-- `workspace` 会保留历史 run 的高价值结论
-- 系统会记住用户在这个 workspace 中反复强调的偏好与标准
-- 常用探索套路会沉淀为 skill，并在相关任务中自动装载
-- 新一轮探索不应表现得像失忆重来
+- `workspace` 会保留历史 run 的高价值结论（Persistent knowledge base）
+- 系统会记住用户在这个 workspace 中反复强调的偏好与标准（User preference learning）
+- 常用探索套路会沉淀为 skill，并在相关任务中自动装载（Skill acquisition and application）
+- 新一轮探索不应表现得像失忆重来（Cross-run context continuation）
 
 产品上应至少让用户看到：
 
-- 当前有哪些长期记忆在生效
-- 当前有哪些 skill 或工作模板被装载
-- 某一条偏好或政策是从何时开始影响系统行为的
+- 当前有哪些长期记忆在生效（Active memory display）
+- 当前有哪些 skill 或工作模板被装载（Loaded skill inventory）
+- 某一条偏好或政策是从何时开始影响系统行为的（Preference timeline）
 
 ## 11. 北极星与能力验收（产品层）
 
@@ -189,13 +195,13 @@
 
 产品层能力验收：
 
-- 能看到至少 2-3 条可比较方向，而非一堆平铺想法
-- 能解释方向变化，不只展示新内容
-- 用户可以显式地暂停、继续、转向、审查、转产物
-- 干预后能观察到可见结构变化与后续重心变化
-- 用户能看见系统当前正在做什么，而不是只看到最终结果
+- 能看到至少 2-3 条可比较方向，而非一堆平铺想法（Structured exploration vs. brainstorming）
+- 能解释方向变化，不只展示新内容（Change justification vs. mere addition）
+- 用户可以显式地暂停、继续、转向、审查、转产物（Explicit control availability）
+- 干预后能观察到可见结构变化与后续重心变化（Control absorption verification）
+- 用户能看见系统当前正在做什么，而不是只看到最终结果（Process transparency）
 - 能观察到方向生命周期推进（`emerging -> developing -> mature`）
-- 能感知系统存在长期记忆与 skill，而不是每轮都像首次运行
+- 能感知系统存在长期记忆与 skill，而不是每轮都像首次运行（Long-term capability evidence）
 
 ## 12. 术语主入口与引用规则
 
@@ -208,3 +214,8 @@
 ## 13. 一句话总结
 
 `Idea Factory` 的产品面必须始终围绕“用户治理方向地图 + 用户通过控制台驾驭自治系统”，而不是让用户直接面对一个难以预测的运行内核。
+
+这一定位直接来源于三层架构的融合：
+- Claude Code 提供控制面范式（用户如何真正控制系统）
+- Codex 提供执行协议范式（系统如何安全可追溯地执行）
+- Hermes 提供长期能力范式（系统如何随时间学习和改进）

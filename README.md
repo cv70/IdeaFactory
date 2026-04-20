@@ -4,6 +4,21 @@
 
 `Idea Factory` 是一个 `Graph-First, Research-Augmented Exploration OS`。它的 v1 目标不是生成一批一次性的点子，而是在一个长期存在的 `workspace` 中，让系统持续主驾驶探索，把模糊主题推进成一张可追溯、可干预、可继续扩展的 `方向地图`。
 
+## 🏗️ Three-Layer Architecture
+
+Idea Factory implements a three-layer architecture inspired by leading agent systems:
+
+### L1: Control Face (治理面) - Inspired by Claude Code
+Provides explicit user controls for governing the autonomous system. Users interact with the system through structured control actions rather than free-form prompts alone.
+
+### L2: Execution Protocol Layer (执行协议层) - Inspired by Codex
+Defines hard boundaries for safe, traceable execution. All system actions follow clear protocols with explicit approval mechanisms and immutable audit trails.
+
+### L3: Long-Term Capability Layer (长期能力层) - Inspired by Hermes Agent
+Enables persistent learning and capability accumulation across runs through memory systems, skill binding, and user preference modeling.
+
+These layers work together: the Control Face provides user governance, the Execution Protocol ensures safe execution, and the Long-Term Capability Layer enables the system to learn and improve over time.
+
 ## v1 定义
 
 - `workspace` 是产品的一等对象，承载目标、约束、上下文、运行历史、长期记忆和技能绑定。
@@ -35,7 +50,7 @@
 - Claude Code / Codex / Hermes 参考文档集：[docs/claudecode-codex-hermes/README.md](docs/claudecode-codex-hermes/README.md)
 - Codex / Hermes 旧参考文档集（历史草稿）：[docs/codex-hermes/README.md](docs/codex-hermes/README.md)
 
-建议阅读顺序：
+## 建议阅读顺序
 
 1. 先读本页，理解项目定位和当前阶段。
 2. 再读产品设计，理解 `方向地图 + 控制台` 的产品心智与用户治理方式。

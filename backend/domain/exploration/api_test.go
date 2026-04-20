@@ -570,6 +570,100 @@ func TestV1ProjectionAndInterventionLifecycle(t *testing.T) {
 	}
 }
 
+func TestV1ControlActionLifecycleAndRuntimeProjection(t *testing.T) {
+	r := newTestRouter()
+
+	createBody := []byte(`{"topic":"AI education","output_goal":"Research directions","constraints":"Low-cost, explainable"}`)
+	createReq, _ := http.NewRequest(http.MethodPost, "/api/v1/workspaces", bytes.NewBuffer(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	r.ServeHTTP(createW, createReq)
+
+	var created WorkspaceResponse
+	if err := json.Unmarshal(createW.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	workspaceID := created.Workspace.ID
+
+	controlReq, _ := http.NewRequest(
+		http.MethodPost,
+		"/api/v1/workspaces/"+workspaceID+"/control-actions",
+		strings.NewReader(`{"kind":"intervention","intent":"focus on strongest branch"}`),
+	)
+	controlReq.Header.Set("Content-Type", "application/json")
+	controlW := httptest.NewRecorder()
+	r.ServeHTTP(controlW, controlReq)
+	if controlW.Code != http.StatusAccepted {
+		t.Fatalf("unexpected control action status: %d", controlW.Code)
+	}
+
+	var controlResp ControlActionResponse
+	if err := json.Unmarshal(controlW.Body.Bytes(), &controlResp); err != nil {
+		t.Fatalf("decode control action response: %v", err)
+	}
+	if controlResp.ControlAction.ID == "" {
+		t.Fatal("expected control action id")
+	}
+	if controlResp.ControlAction.Kind != ControlActionIntervention {
+		t.Fatalf("expected intervention kind, got %s", controlResp.ControlAction.Kind)
+	}
+
+	getReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/control-actions/"+controlResp.ControlAction.ID, nil)
+	getW := httptest.NewRecorder()
+	r.ServeHTTP(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("unexpected get control action status: %d", getW.Code)
+	}
+
+	eventsReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/control-actions/"+controlResp.ControlAction.ID+"/events", nil)
+	eventsW := httptest.NewRecorder()
+	r.ServeHTTP(eventsW, eventsReq)
+	if eventsW.Code != http.StatusOK {
+		t.Fatalf("unexpected control action events status: %d", eventsW.Code)
+	}
+	var eventsResp ControlActionEventsResponse
+	if err := json.Unmarshal(eventsW.Body.Bytes(), &eventsResp); err != nil {
+		t.Fatalf("decode control action events response: %v", err)
+	}
+	if len(eventsResp.Events) == 0 {
+		t.Fatal("expected control action events")
+	}
+
+	runtimeReq, _ := http.NewRequest(http.MethodGet, "/api/v1/exploration/workspaces/"+workspaceID+"/runtime", nil)
+	runtimeW := httptest.NewRecorder()
+	r.ServeHTTP(runtimeW, runtimeReq)
+	if runtimeW.Code != http.StatusOK {
+		t.Fatalf("unexpected runtime state status: %d", runtimeW.Code)
+	}
+	var runtimeResp testResp[RuntimeStateSnapshot]
+	if err := json.Unmarshal(runtimeW.Body.Bytes(), &runtimeResp); err != nil {
+		t.Fatalf("decode runtime response: %v", err)
+	}
+	if len(runtimeResp.Data.ControlActions) == 0 {
+		t.Fatal("expected runtime control actions")
+	}
+
+	projectionReq, _ := http.NewRequest(http.MethodGet, "/api/v1/workspaces/"+workspaceID+"/projection", nil)
+	projectionW := httptest.NewRecorder()
+	r.ServeHTTP(projectionW, projectionReq)
+	if projectionW.Code != http.StatusOK {
+		t.Fatalf("unexpected projection status: %d", projectionW.Code)
+	}
+	var projectionResp ProjectionResponse
+	if err := json.Unmarshal(projectionW.Body.Bytes(), &projectionResp); err != nil {
+		t.Fatalf("decode projection response: %v", err)
+	}
+	if projectionResp.Projection.RunSummary.RunID == "" {
+		t.Fatal("expected run summary in projection")
+	}
+	if projectionResp.Projection.TurnSummary.TurnID == "" {
+		t.Fatal("expected turn summary in projection")
+	}
+	if len(projectionResp.Projection.ControlEffects) == 0 {
+		t.Fatal("expected control effects in projection")
+	}
+}
+
 func TestV1TraceSummary(t *testing.T) {
 	r := newTestRouter()
 

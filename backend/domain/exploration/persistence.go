@@ -245,6 +245,15 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 		}
 		out.LatestReplanReason = balance.LatestReplanReason
 	}
+	if records, err := d.DB.ListInterventionEventsByPrefix(workspaceID, "", "v1_control_action_snapshot", 500); err == nil {
+		for _, record := range records {
+			view, err := decodeControlActionSnapshot(record)
+			if err != nil {
+				continue
+			}
+			out.ControlActions = upsertControlAction(out.ControlActions, view)
+		}
+	}
 	if len(out.Runs) == 0 && out.Balance.WorkspaceID == "" {
 		return RuntimeStateSnapshot{}, false
 	}
@@ -253,12 +262,15 @@ func (d *ExplorationDomain) loadRuntimeState(workspaceID string) (RuntimeStateSn
 
 func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.AgentRunRecord) RuntimeStateSnapshot {
 	out := RuntimeStateSnapshot{
-		Runs:        []Run{},
-		AgentTasks:  []AgentTask{},
-		Results:     []AgentTaskResultSummary{},
-		Events:      []AgentRunEvent{},
-		Turns:       []RunTurn{},
-		Checkpoints: []RunCheckpoint{},
+		Runs:           []Run{},
+		AgentTasks:     []AgentTask{},
+		Results:        []AgentTaskResultSummary{},
+		Events:         []AgentRunEvent{},
+		Turns:          []RunTurn{},
+		Checkpoints:    []RunCheckpoint{},
+		ControlActions: []ControlActionView{},
+		LoadedSkills:   []string{},
+		ActiveMemories: []string{},
 	}
 	runIndex := map[string]int{}
 	runTimelines := map[string][]string{}
@@ -299,6 +311,9 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 			if source, _ := payload["source"].(string); source != "" {
 				run.Source = source
 			}
+			if mode, _ := payload["mode"].(string); mode != "" {
+				run.Mode = RunMode(mode)
+			}
 		case "turn_started":
 			turnID, _ := payload["turn_id"].(string)
 			turnIndex := intValue(payload["turn_index"])
@@ -308,12 +323,13 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 			runTurns[record.RunID] = ensureRunTurnIndex(runTurns[record.RunID])
 			runTurns[record.RunID][turnID] = len(out.Turns)
 			out.Turns = append(out.Turns, RunTurn{
-				ID:          turnID,
-				WorkspaceID: workspaceID,
-				RunID:       record.RunID,
-				TurnIndex:   turnIndex,
-				Status:      RunTurnStatusRunning,
-				StartedAt:   record.CreatedAt.UnixMilli(),
+				ID:                 turnID,
+				WorkspaceID:        workspaceID,
+				RunID:              record.RunID,
+				TurnIndex:          turnIndex,
+				Status:             RunTurnStatusRunning,
+				InputContextDigest: stringValue(payload["input_context_digest"]),
+				StartedAt:          record.CreatedAt.UnixMilli(),
 			})
 		case "turn_completed":
 			turnID, _ := payload["turn_id"].(string)
@@ -325,6 +341,9 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 			out.Turns[idx].LeadActor, _ = payload["lead_actor"].(string)
 			out.Turns[idx].Summary, _ = payload["summary"].(string)
 			out.Turns[idx].Timeline = stringSliceValue(payload["timeline"])
+			out.Turns[idx].ContinueReason = stringValue(payload["continue_reason"])
+			out.Turns[idx].ToolCallCount = intValue(payload["tool_call_count"])
+			out.Turns[idx].GraphMutationCount = intValue(payload["graph_mutation_count"])
 		case "turn_failed":
 			turnID, _ := payload["turn_id"].(string)
 			turnIndex := intValue(payload["turn_index"])
@@ -357,6 +376,7 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 				Reason:       reason,
 				CreatedAt:    record.CreatedAt.UnixMilli(),
 			})
+			run.LatestCheckpointID = checkpointID
 			if idx := findTurnIndexByID(out.Turns, turnID); idx >= 0 && resumeCursor != "" {
 				out.Turns[idx].ResumeCursor = resumeCursor
 			}
@@ -431,6 +451,28 @@ func buildRuntimeStateFromAgentRunRecords(workspaceID string, records []dbdao.Ag
 	return out
 }
 
+func decodeControlActionSnapshot(event dbdao.InterventionEvent) (ControlActionView, error) {
+	var view ControlActionView
+	if err := json.Unmarshal([]byte(event.Note), &view); err == nil && view.ID != "" {
+		return view, nil
+	}
+	var legacy InterventionView
+	if err := json.Unmarshal([]byte(event.Note), &legacy); err != nil {
+		return ControlActionView{}, err
+	}
+	return ControlActionView{
+		ID:               legacy.ID,
+		WorkspaceID:      legacy.WorkspaceID,
+		Kind:             ControlActionIntervention,
+		Intent:           legacy.Intent,
+		Status:           ControlActionStatus(legacy.Status),
+		AbsorbedByRunID:  legacy.AbsorbedByRunID,
+		ReflectedEventID: legacy.ReflectedEventID,
+		CreatedAt:        legacy.CreatedAt,
+		UpdatedAt:        legacy.UpdatedAt,
+	}, nil
+}
+
 func appendTimelineValue(values []string, next string) []string {
 	next = strings.TrimSpace(next)
 	if next == "" {
@@ -502,6 +544,13 @@ func intValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+func stringValue(value any) string {
+	if raw, ok := value.(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	return ""
 }
 
 func stringSliceValue(value any) []string {
@@ -743,6 +792,41 @@ func (d *ExplorationDomain) compactMutationLogs(workspaceID string, hardLimit in
 }
 
 func (d *ExplorationDomain) persistV1Intervention(view InterventionView) {
+	d.persistControlAction(ControlActionView{
+		ID:               view.ID,
+		WorkspaceID:      view.WorkspaceID,
+		Kind:             ControlActionIntervention,
+		Intent:           view.Intent,
+		Status:           ControlActionStatus(view.Status),
+		AbsorbedByRunID:  view.AbsorbedByRunID,
+		ReflectedEventID: view.ReflectedEventID,
+		CreatedAt:        view.CreatedAt,
+		UpdatedAt:        view.UpdatedAt,
+	})
+	if d.DB == nil || view.ID == "" || view.WorkspaceID == "" {
+		return
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		return
+	}
+	snapshot := &dbdao.InterventionEvent{
+		WorkspaceID: view.WorkspaceID,
+		Type:        "v1_intervention_snapshot",
+		TargetID:    view.ID,
+		Note:        string(raw),
+	}
+	_ = d.DB.UpsertInterventionEvent(snapshot)
+	history := &dbdao.InterventionEvent{
+		WorkspaceID: view.WorkspaceID,
+		Type:        "v1_intervention_lifecycle_event",
+		TargetID:    view.ID + "#" + string(view.Status),
+		Note:        string(raw),
+	}
+	_ = d.DB.CreateInterventionEvent(history)
+}
+
+func (d *ExplorationDomain) persistControlAction(view ControlActionView) {
 	if d.DB == nil || view.ID == "" || view.WorkspaceID == "" {
 		return
 	}
@@ -753,7 +837,7 @@ func (d *ExplorationDomain) persistV1Intervention(view InterventionView) {
 	// Snapshot record keeps the latest lifecycle state for fast point-read.
 	snapshot := &dbdao.InterventionEvent{
 		WorkspaceID: view.WorkspaceID,
-		Type:        "v1_intervention_snapshot",
+		Type:        "v1_control_action_snapshot",
 		TargetID:    view.ID,
 		Note:        string(raw),
 	}
@@ -762,24 +846,50 @@ func (d *ExplorationDomain) persistV1Intervention(view InterventionView) {
 	// History record appends each lifecycle change for replay/audit.
 	history := &dbdao.InterventionEvent{
 		WorkspaceID: view.WorkspaceID,
-		Type:        "v1_intervention_lifecycle_event",
-		TargetID:    view.ID,
+		Type:        "v1_control_action_lifecycle_event",
+		TargetID:    view.ID + "#" + string(view.Status),
 		Note:        string(raw),
 	}
 	_ = d.DB.CreateInterventionEvent(history)
 }
 
 func (d *ExplorationDomain) loadV1Intervention(workspaceID string, interventionID string) (InterventionView, bool) {
-	if d.DB == nil || workspaceID == "" || interventionID == "" {
+	action, ok := d.loadControlAction(workspaceID, interventionID)
+	if !ok {
 		return InterventionView{}, false
 	}
-	event, err := d.DB.GetLatestInterventionEventByTarget(workspaceID, interventionID, "v1_intervention_snapshot")
+	return interventionViewFromControlAction(action), true
+}
+
+func (d *ExplorationDomain) loadControlAction(workspaceID string, controlActionID string) (ControlActionView, bool) {
+	if d.DB == nil || workspaceID == "" || controlActionID == "" {
+		return ControlActionView{}, false
+	}
+	event, err := d.DB.GetLatestInterventionEventByTarget(workspaceID, controlActionID, "v1_control_action_snapshot")
+	if err == nil && event != nil && event.Type == "v1_control_action_snapshot" {
+		var view ControlActionView
+		if jsonErr := json.Unmarshal([]byte(event.Note), &view); jsonErr == nil {
+			return view, true
+		}
+	}
+
+	event, err = d.DB.GetLatestInterventionEventByTarget(workspaceID, controlActionID, "v1_intervention_snapshot")
 	if err != nil || event == nil || event.Type != "v1_intervention_snapshot" {
-		return InterventionView{}, false
+		return ControlActionView{}, false
 	}
-	var view InterventionView
-	if err := json.Unmarshal([]byte(event.Note), &view); err != nil {
-		return InterventionView{}, false
+	var legacy InterventionView
+	if err := json.Unmarshal([]byte(event.Note), &legacy); err != nil {
+		return ControlActionView{}, false
 	}
-	return view, true
+	return ControlActionView{
+		ID:               legacy.ID,
+		WorkspaceID:      legacy.WorkspaceID,
+		Kind:             ControlActionIntervention,
+		Intent:           legacy.Intent,
+		Status:           ControlActionStatus(legacy.Status),
+		AbsorbedByRunID:  legacy.AbsorbedByRunID,
+		ReflectedEventID: legacy.ReflectedEventID,
+		CreatedAt:        legacy.CreatedAt,
+		UpdatedAt:        legacy.UpdatedAt,
+	}, true
 }

@@ -19,6 +19,7 @@ Workspace:
 - constraints: %s
 - active_opportunity_id: %s
 - latest_replan_reason: %s
+- pending_control_actions: %s
 - balance: divergence=%.2f research=%.2f aggression=%.2f
 
 Current graph summary:
@@ -50,6 +51,7 @@ Examples:
 		firstNonEmpty(session.Constraints, "none"),
 		session.ActiveOpportunityID,
 		firstNonEmpty(state.ReplanReason, "none"),
+		strings.Join(describePendingControlActions(state.ControlActions), " | "),
 		state.Balance.Divergence,
 		state.Balance.Research,
 		state.Balance.Aggression,
@@ -60,6 +62,23 @@ Examples:
 		joinEdgeTypes(validEdgeTypes()),
 		joinNodeStatuses(validNodeStatuses()),
 	)
+}
+
+func describePendingControlActions(actions []ControlActionView) []string {
+	if len(actions) == 0 {
+		return []string{"none"}
+	}
+	out := make([]string, 0, len(actions))
+	for _, action := range actions {
+		if action.Status == ControlActionReflected || action.Status == ControlActionRejected {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s:%s", action.Kind, firstNonEmpty(action.Intent, "no-intent")))
+	}
+	if len(out) == 0 {
+		return []string{"none"}
+	}
+	return out
 }
 
 func recentNodeIDs(nodes []Node, limit int) []string {

@@ -5,6 +5,8 @@ import (
 	"backend/config"
 	"backend/infra"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,14 +18,15 @@ import (
 )
 
 func newTestExplorationDomain() *ExplorationDomain {
-	ctx := context.Background()
-	c, err := config.LoadConfig()
+	dir, err := os.MkdirTemp("", "idea-factory-test-*")
 	mistake.Unwrap(err)
-	r, err := infra.NewRegistry(ctx, c)
+	db, err := infra.NewDB(context.Background(), &config.DatabaseConfig{
+		DB: filepath.Join(dir, "idea-factory.sqlite"),
+	})
 	mistake.Unwrap(err)
-	ed, err := BuildExplorationDomain(r)
-	mistake.Unwrap(err)
-	return ed
+	domain := newScriptedExplorationDomain()
+	domain.DB = db
+	return domain
 }
 
 func TestRuntimeCanBeTriggeredForAdditionalRuns(t *testing.T) {
